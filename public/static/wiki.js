@@ -6,7 +6,7 @@
   'use strict';
 
   // State
-  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home', browseProject: '', searchMode: 'fts' };
+  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home', browseProject: '', searchMode: 'fts', user: null };
 
   function $(s) { return document.querySelector(s); }
   function $$(s) { return document.querySelectorAll(s); }
@@ -19,7 +19,7 @@
   // ============ VIEW MANAGEMENT ============
   window.showView = function(view) {
     state.currentView = view;
-    ['homeView', 'searchView', 'browseView', 'dashboardView', 'askView'].forEach(function(id) {
+    ['homeView', 'searchView', 'browseView', 'dashboardView', 'askView', 'loginView', 'registerView'].forEach(function(id) {
       var el = $('#' + id);
       if (el) el.classList.add('hidden');
     });
@@ -43,6 +43,10 @@
       $('#askView').classList.remove('hidden');
       $('[data-view="ask"]').classList.add('active');
       loadAskView();
+    } else if (view === 'login') {
+      $('#loginView').classList.remove('hidden');
+    } else if (view === 'register') {
+      $('#registerView').classList.remove('hidden');
     }
   };
 
@@ -621,8 +625,10 @@
 
   function toast(msg, type) {
     var t = $('#toast');
+    if (!t) return;
     t.className = 'fixed bottom-4 right-4 z-50 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all';
-    t.classList.add(type === 'success' ? 'bg-emerald-500' : 'bg-red-500', 'text-white');
+    var bg = type === 'success' ? 'bg-emerald-500' : type === 'info' ? 'bg-blue-500' : 'bg-red-500';
+    t.classList.add(bg, 'text-white');
     t.textContent = msg;
     t.classList.remove('hidden');
     setTimeout(function() { t.classList.add('hidden'); }, 2500);
@@ -806,7 +812,146 @@
     });
   });
 
+  // ============ AUTH ============
+  function checkAuth() {
+    fetch(API + '/api/auth/me', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.authenticated && data.user) {
+          state.user = data.user;
+          showLoggedIn(data.user);
+        } else {
+          state.user = null;
+          showLoggedOut();
+        }
+      })
+      .catch(function() { state.user = null; showLoggedOut(); });
+  }
+
+  function showLoggedIn(user) {
+    var guest = $('#authGuest');
+    var userEl = $('#authUser');
+    if (guest) guest.classList.add('hidden');
+    if (userEl) userEl.classList.remove('hidden');
+
+    var avatarImg = $('#userAvatar');
+    var avatarPh = $('#userAvatarPlaceholder');
+    if (user.avatar_url) {
+      if (avatarImg) { avatarImg.src = user.avatar_url; avatarImg.classList.remove('hidden'); }
+      if (avatarPh) avatarPh.classList.add('hidden');
+    } else {
+      if (avatarImg) avatarImg.classList.add('hidden');
+      if (avatarPh) { avatarPh.classList.remove('hidden'); avatarPh.textContent = (user.name || 'U').charAt(0).toUpperCase(); }
+    }
+
+    if ($('#userName')) $('#userName').textContent = user.name || '';
+    if ($('#dropdownName')) $('#dropdownName').textContent = user.name || '';
+    if ($('#dropdownEmail')) $('#dropdownEmail').textContent = user.email || '';
+    if ($('#dropdownProvider')) {
+      var providerMap = { kakao: '카카오', naver: '네이버', google: 'Google', email: '이메일' };
+      $('#dropdownProvider').textContent = providerMap[user.provider] || user.provider;
+    }
+  }
+
+  function showLoggedOut() {
+    var guest = $('#authGuest');
+    var userEl = $('#authUser');
+    if (guest) guest.classList.remove('hidden');
+    if (userEl) userEl.classList.add('hidden');
+  }
+
+  // User dropdown toggle
+  if ($('#userMenuBtn')) {
+    $('#userMenuBtn').addEventListener('click', function(e) {
+      e.stopPropagation();
+      var dd = $('#userDropdown');
+      if (dd) dd.classList.toggle('hidden');
+    });
+  }
+  document.addEventListener('click', function() {
+    var dd = $('#userDropdown');
+    if (dd) dd.classList.add('hidden');
+  });
+
+  // Email login
+  window.handleEmailLogin = function(e) {
+    e.preventDefault();
+    var email = ($('#loginEmail') || {}).value || '';
+    var password = ($('#loginPassword') || {}).value || '';
+    var errEl = $('#loginError');
+    if (errEl) errEl.classList.add('hidden');
+
+    fetch(API + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.success) {
+        state.user = data.user;
+        showLoggedIn(data.user);
+        showView('home');
+        toast('로그인 성공! 환영합니다, ' + data.user.name, 'success');
+      } else {
+        if (errEl) { errEl.textContent = data.error || '로그인 실패'; errEl.classList.remove('hidden'); }
+      }
+    }).catch(function(err) {
+      if (errEl) { errEl.textContent = '네트워크 오류'; errEl.classList.remove('hidden'); }
+    });
+  };
+
+  // Email register
+  window.handleEmailRegister = function(e) {
+    e.preventDefault();
+    var name = ($('#regName') || {}).value || '';
+    var email = ($('#regEmail') || {}).value || '';
+    var password = ($('#regPassword') || {}).value || '';
+    var passwordConfirm = ($('#regPasswordConfirm') || {}).value || '';
+    var errEl = $('#registerError');
+    if (errEl) errEl.classList.add('hidden');
+
+    if (password !== passwordConfirm) {
+      if (errEl) { errEl.textContent = '비밀번호가 일치하지 않습니다.'; errEl.classList.remove('hidden'); }
+      return;
+    }
+
+    fetch(API + '/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ email: email, password: password, name: name })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.success) {
+        state.user = data.user;
+        showLoggedIn(data.user);
+        showView('home');
+        toast('회원가입 완료! 환영합니다, ' + data.user.name, 'success');
+      } else {
+        if (errEl) { errEl.textContent = data.error || '가입 실패'; errEl.classList.remove('hidden'); }
+      }
+    }).catch(function(err) {
+      if (errEl) { errEl.textContent = '네트워크 오류'; errEl.classList.remove('hidden'); }
+    });
+  };
+
+  // Social login
+  window.socialLogin = function(provider) {
+    window.location.href = API + '/api/auth/' + provider;
+  };
+
+  // Logout
+  window.handleLogout = function() {
+    fetch(API + '/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+      .then(function() {
+        state.user = null;
+        showLoggedOut();
+        showView('home');
+        toast('로그아웃 되었습니다.', 'info');
+      });
+  };
+
   // ============ INIT ============
+  checkAuth();
   loadHome();
-  $('#searchInput').focus();
+  if ($('#searchInput')) $('#searchInput').focus();
 })();

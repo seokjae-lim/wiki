@@ -109,3 +109,9 @@ mark { background: #fef08a; color: #1a1a1a; padding: 1px 3px; border-radius: 3px
 
 /* Search mode active */
 .search-mode-active { background: #ede9fe; color: #7c3aed; font-weight: 600; }
+
+/* Auth forms */
+#loginView input:focus, #registerView input:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+#userDropdown { animation: fadeIn 0.15s ease; }
+#userMenuBtn:hover #userAvatarPlaceholder { transform: scale(1.05); }
+

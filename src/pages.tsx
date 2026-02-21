@@ -64,6 +64,35 @@ pageRoutes.get('/', (c) => {
           <button id="seedBtnTop" class="px-3 py-1.5 text-xs text-primary-600 hover:bg-primary-50 rounded-md transition">
             <i class="fas fa-database mr-1"></i>데모 로드
           </button>
+          <div class="w-px h-5 bg-gray-200 mx-1"></div>
+          <!-- Auth: Not logged in -->
+          <div id="authGuest" class="flex items-center gap-1">
+            <button onclick="showView('login')" class="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition">
+              <i class="fas fa-sign-in-alt mr-1"></i>로그인
+            </button>
+            <button onclick="showView('register')" class="px-3 py-1.5 text-xs bg-primary-600 text-white rounded-md hover:bg-primary-700 transition">
+              <i class="fas fa-user-plus mr-1"></i>회원가입
+            </button>
+          </div>
+          <!-- Auth: Logged in -->
+          <div id="authUser" class="hidden relative">
+            <button id="userMenuBtn" class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md hover:bg-gray-100 transition">
+              <img id="userAvatar" src="" class="w-6 h-6 rounded-full object-cover border border-gray-200 hidden" alt="">
+              <span id="userAvatarPlaceholder" class="w-6 h-6 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-[10px] font-bold"></span>
+              <span id="userName" class="font-medium text-gray-700 max-w-[80px] truncate"></span>
+              <i class="fas fa-chevron-down text-[8px] text-gray-400"></i>
+            </button>
+            <div id="userDropdown" class="hidden absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-2">
+              <div class="px-4 py-2 border-b border-gray-100">
+                <p id="dropdownName" class="text-sm font-medium text-gray-800"></p>
+                <p id="dropdownEmail" class="text-xs text-gray-400 truncate"></p>
+                <span id="dropdownProvider" class="inline-block mt-1 px-1.5 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-500"></span>
+              </div>
+              <button onclick="handleLogout()" class="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 transition">
+                <i class="fas fa-sign-out-alt mr-2"></i>로그아웃
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <!-- Search bar -->
@@ -364,6 +393,127 @@ pageRoutes.get('/', (c) => {
             <i class="fas fa-paper-plane mr-1"></i>질문
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LOGIN VIEW ============ -->
+  <div id="loginView" class="hidden max-w-md mx-auto px-4 py-12">
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+      <div class="bg-gradient-to-r from-primary-600 to-primary-800 p-6 text-white text-center">
+        <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <i class="fas fa-sign-in-alt text-2xl"></i>
+        </div>
+        <h2 class="text-xl font-bold">로그인</h2>
+        <p class="text-xs text-white/70 mt-1">Knowledge Wiki에 로그인하세요</p>
+      </div>
+      <div class="p-6 space-y-4">
+        <!-- Social Login Buttons -->
+        <div id="socialLoginBtns" class="space-y-2">
+          <button onclick="socialLogin('kakao')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md" style="background:#FEE500;color:#191919">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#191919" d="M9 1C4.58 1 1 3.87 1 7.35c0 2.17 1.4 4.08 3.53 5.2l-.9 3.32a.2.2 0 00.3.22l3.75-2.5c.43.05.87.08 1.32.08 4.42 0 8-2.87 8-6.32S13.42 1 9 1z"/></svg>
+            카카오 로그인
+          </button>
+          <button onclick="socialLogin('naver')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md" style="background:#03C75A;color:#FFF">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#FFF" d="M12.16 9.63L5.56 0H0v18h5.84V8.37L12.44 18H18V0h-5.84z"/></svg>
+            네이버 로그인
+          </button>
+          <button onclick="socialLogin('google')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md bg-white text-gray-700">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.25-.164-1.84H9v3.48h4.844a4.14 4.14 0 01-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.614z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.836.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+            Google 로그인
+          </button>
+        </div>
+
+        <!-- Divider -->
+        <div class="flex items-center gap-3">
+          <div class="flex-1 h-px bg-gray-200"></div>
+          <span class="text-xs text-gray-400">또는 이메일로</span>
+          <div class="flex-1 h-px bg-gray-200"></div>
+        </div>
+
+        <!-- Email Login Form -->
+        <form id="loginForm" onsubmit="handleEmailLogin(event)" class="space-y-3">
+          <div>
+            <input id="loginEmail" type="email" placeholder="이메일" required
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div>
+            <input id="loginPassword" type="password" placeholder="비밀번호" required minlength="6"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div id="loginError" class="hidden text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2"></div>
+          <button type="submit" class="w-full py-3 bg-primary-600 text-white rounded-xl text-sm font-medium hover:bg-primary-700 transition">
+            <i class="fas fa-sign-in-alt mr-2"></i>이메일로 로그인
+          </button>
+        </form>
+
+        <p class="text-center text-xs text-gray-400">
+          계정이 없으신가요? <button onclick="showView('register')" class="text-primary-600 hover:underline font-medium">회원가입</button>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ REGISTER VIEW ============ -->
+  <div id="registerView" class="hidden max-w-md mx-auto px-4 py-12">
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+      <div class="bg-gradient-to-r from-accent-500 to-green-600 p-6 text-white text-center">
+        <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <i class="fas fa-user-plus text-2xl"></i>
+        </div>
+        <h2 class="text-xl font-bold">회원가입</h2>
+        <p class="text-xs text-white/70 mt-1">Knowledge Wiki 계정을 만드세요</p>
+      </div>
+      <div class="p-6 space-y-4">
+        <!-- Social Register -->
+        <div class="space-y-2">
+          <button onclick="socialLogin('kakao')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md" style="background:#FEE500;color:#191919">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#191919" d="M9 1C4.58 1 1 3.87 1 7.35c0 2.17 1.4 4.08 3.53 5.2l-.9 3.32a.2.2 0 00.3.22l3.75-2.5c.43.05.87.08 1.32.08 4.42 0 8-2.87 8-6.32S13.42 1 9 1z"/></svg>
+            카카오로 시작
+          </button>
+          <button onclick="socialLogin('naver')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md" style="background:#03C75A;color:#FFF">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#FFF" d="M12.16 9.63L5.56 0H0v18h5.84V8.37L12.44 18H18V0h-5.84z"/></svg>
+            네이버로 시작
+          </button>
+          <button onclick="socialLogin('google')" class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition border border-gray-200 hover:shadow-md bg-white text-gray-700">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.25-.164-1.84H9v3.48h4.844a4.14 4.14 0 01-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.614z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.836.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+            Google로 시작
+          </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="flex-1 h-px bg-gray-200"></div>
+          <span class="text-xs text-gray-400">또는 이메일로</span>
+          <div class="flex-1 h-px bg-gray-200"></div>
+        </div>
+
+        <!-- Email Register Form -->
+        <form id="registerForm" onsubmit="handleEmailRegister(event)" class="space-y-3">
+          <div>
+            <input id="regName" type="text" placeholder="이름" required
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div>
+            <input id="regEmail" type="email" placeholder="이메일" required
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div>
+            <input id="regPassword" type="password" placeholder="비밀번호 (6자 이상)" required minlength="6"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div>
+            <input id="regPasswordConfirm" type="password" placeholder="비밀번호 확인" required minlength="6"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-green-500 bg-gray-50 focus:bg-white transition">
+          </div>
+          <div id="registerError" class="hidden text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2"></div>
+          <button type="submit" class="w-full py-3 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition">
+            <i class="fas fa-user-plus mr-2"></i>이메일로 가입하기
+          </button>
+        </form>
+
+        <p class="text-center text-xs text-gray-400">
+          이미 계정이 있으신가요? <button onclick="showView('login')" class="text-primary-600 hover:underline font-medium">로그인</button>
+        </p>
       </div>
     </div>
   </div>
