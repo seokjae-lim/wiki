@@ -96,3 +96,16 @@ mark { background: #fef08a; color: #1a1a1a; padding: 1px 3px; border-radius: 3px
 .meta-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
 .meta-label { font-size: 0.65rem; color: #9ca3af; font-weight: 500; white-space: nowrap; }
 .meta-value { font-size: 0.7rem; color: #374151; }
+
+/* AI Q&A chat */
+#chatHistory::-webkit-scrollbar { width: 4px; }
+#chatHistory::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+
+/* Similarity badge */
+.similarity-badge { 
+  font-size: 0.6rem; padding: 2px 6px; border-radius: 10px; 
+  background: #f3e8ff; color: #7c3aed; font-weight: 600; 
+}
+
+/* Search mode active */
+.search-mode-active { background: #ede9fe; color: #7c3aed; font-weight: 600; }

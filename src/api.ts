@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 type Bindings = {
   DB: D1Database
+  OPENAI_API_KEY?: string
 }
 
 export const apiRoutes = new Hono<{ Bindings: Bindings }>()
@@ -827,3 +828,414 @@ function getDemoData() {
     },
   ]
 }
+
+
+// =============================================
+// Phase 3: Semantic Search & AI Q&A
+// =============================================
+
+// ---------- TF-IDF Lightweight Embedding (no external API needed) ----------
+
+// Korean + English vocabulary for demo embedding (256 terms -> 256-dim vector)
+const VOCAB: string[] = [
+  // Korean domain terms
+  '데이터','거버넌스','인프라','보안','전략','정책','클라우드','서버','네트워크','스토리지',
+  '플랫폼','시스템','아키텍처','표준','품질','관리','메타데이터','카탈로그','마스터',
+  'API','운영','개발','구축','설계','분석','조사','평가','성숙도','모니터링','자동화',
+  '국가','공공','민간','정부','부처','기관','지자체','중앙','행정','디지털',
+  '전환','혁신','고도화','통합','연계','개방','활용','촉진','확대','강화',
+  'AI','인공지능','머신러닝','딥러닝','생성형','LLM','멀티모달','RAG','챗봇','에이전트',
+  'NLP','자연어','강화학습','XAI','연합학습','트랜스포머','파운데이션','모델','추론','학습',
+  '빅데이터','데이터셋','오픈데이터','마이데이터','데이터레이크','파이프라인','ETL','수집','가공','정제',
+  '보건','복지','의료','건강','보험','진료','비식별','프라이버시','개인정보','동의',
+  '국토','교통','부동산','공간정보','GIS','위치','도시','건축','토지','측량',
+  '환경','대기','수질','기후','탄소','에너지','재생','폐기물','생태','녹색',
+  '교육','연구','대학','학술','논문','기술','과학','산업','제조','농업',
+  'ISP','ISMP','EA','ITA','PMO','WBS','RFP','BMT','SLA','KPI',
+  '로드맵','비전','목표','과제','이행','단계','추진','일정','예산','투자',
+  '제안','착수','중간','최종','보고','산출','결과','검수','납품','완료',
+  '프로젝트','사업','계약','발주','수행','컨설팅','용역','위탁','협력','파트너',
+  // English terms
+  'data','governance','infrastructure','security','strategy','policy','cloud','server','network','storage',
+  'platform','system','architecture','standard','quality','management','metadata','catalog','master',
+  'operation','development','deployment','design','analysis','survey','evaluation','maturity','monitoring','automation',
+  'national','public','private','government','ministry','agency','local','central','administrative','digital',
+  'transformation','innovation','advancement','integration','linkage','openness','utilization','promotion','expansion','strengthening',
+  'artificial','intelligence','machine','learning','deep','generative','multimodal','chatbot','agent',
+  'natural','language','reinforcement','explainable','federated','transformer','foundation','model','inference','training',
+  'bigdata','dataset','opendata','mydata','datalake','pipeline','collection','processing','cleansing',
+  'health','welfare','medical','insurance','treatment','deidentification','privacy','personal','consent',
+  'land','transport','realestate','spatial','location','urban','construction',
+  'environment','air','water','climate','carbon','energy','renewable','waste','ecology','green',
+  'education','research','university','academic','paper','technology','science','industry','manufacturing','agriculture',
+  'roadmap','vision','goal','task','implementation','phase','schedule','budget','investment',
+  'proposal','kickoff','interim','final','report','deliverable','result','inspection','delivery','completion',
+  'project','contract','procurement','execution','consulting','outsourcing','cooperation','partner'
+];
+
+function textToVector(text: string): number[] {
+  const lower = text.toLowerCase();
+  const vec = new Array(VOCAB.length).fill(0);
+  let norm = 0;
+  
+  for (let i = 0; i < VOCAB.length; i++) {
+    const term = VOCAB[i].toLowerCase();
+    // Count occurrences
+    let count = 0;
+    let pos = 0;
+    while ((pos = lower.indexOf(term, pos)) !== -1) {
+      count++;
+      pos += term.length;
+    }
+    if (count > 0) {
+      // TF with sublinear scaling: 1 + log(count)
+      vec[i] = 1 + Math.log(count);
+      norm += vec[i] * vec[i];
+    }
+  }
+  
+  // L2 normalize
+  if (norm > 0) {
+    const sqrtNorm = Math.sqrt(norm);
+    for (let i = 0; i < vec.length; i++) {
+      vec[i] = Math.round((vec[i] / sqrtNorm) * 10000) / 10000; // 4 decimal places
+    }
+  }
+  
+  return vec;
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// =============================================
+// POST /api/embeddings/generate - Generate embeddings for all chunks
+// =============================================
+apiRoutes.post('/embeddings/generate', async (c) => {
+  const db = c.env.DB;
+  
+  try {
+    // Get all chunks without embeddings
+    const chunks = await db.prepare(`
+      SELECT rowid, chunk_id, text, tags, category, doc_title, project_path
+      FROM chunks WHERE embedding = '' OR embedding IS NULL
+    `).all();
+    
+    if (!chunks.results || chunks.results.length === 0) {
+      return c.json({ message: 'All chunks already have embeddings', count: 0 });
+    }
+    
+    let updated = 0;
+    const batchSize = 10;
+    
+    for (let i = 0; i < chunks.results.length; i += batchSize) {
+      const batch = chunks.results.slice(i, i + batchSize);
+      const statements = batch.map(chunk => {
+        // Combine text with metadata for richer embedding
+        const tags = (() => { try { return JSON.parse(chunk.tags as string || '[]').join(' '); } catch { return ''; } })();
+        const combined = `${chunk.doc_title || ''} ${chunk.category || ''} ${tags} ${chunk.project_path || ''} ${chunk.text || ''}`;
+        const vec = textToVector(combined);
+        
+        return db.prepare(`
+          UPDATE chunks SET embedding = ?, embed_model = 'tfidf-256' WHERE chunk_id = ?
+        `).bind(JSON.stringify(vec), chunk.chunk_id as string);
+      });
+      
+      await db.batch(statements);
+      updated += batch.length;
+    }
+    
+    return c.json({ message: `Generated embeddings for ${updated} chunks`, count: updated, model: 'tfidf-256', dimensions: VOCAB.length });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// =============================================
+// GET /api/semantic-search - Vector similarity search
+// =============================================
+apiRoutes.get('/semantic-search', async (c) => {
+  const db = c.env.DB;
+  const q = c.req.query('q') || '';
+  const type = c.req.query('type') || '';
+  const project = c.req.query('project') || '';
+  const category = c.req.query('category') || '';
+  const limit = parseInt(c.req.query('limit') || '20');
+  const threshold = parseFloat(c.req.query('threshold') || '0.1');
+  
+  if (!q.trim()) {
+    return c.json({ results: [], total: 0, query: q, mode: 'semantic' });
+  }
+  
+  try {
+    // Generate query vector
+    const queryVec = textToVector(q);
+    
+    // Get all chunks with embeddings + optional filters
+    let sql = `SELECT chunk_id, file_path, file_type, project_path, doc_title,
+      location_type, location_value, location_detail, 
+      substr(text, 1, 300) as snippet, mtime, tags, category, sub_category,
+      author, org, doc_stage, doc_year, importance, view_count, summary, embedding
+      FROM chunks WHERE embedding != '' AND embedding IS NOT NULL`;
+    const params: any[] = [];
+    
+    if (type) { sql += ` AND file_type = ?`; params.push(type); }
+    if (project) { sql += ` AND project_path LIKE ?`; params.push(`%${project}%`); }
+    if (category) { sql += ` AND category = ?`; params.push(category); }
+    
+    const results = await db.prepare(sql).bind(...params).all();
+    
+    if (!results.results || results.results.length === 0) {
+      return c.json({ results: [], total: 0, query: q, mode: 'semantic', hint: 'No embeddings found. Call POST /api/embeddings/generate first.' });
+    }
+    
+    // Calculate cosine similarity for each
+    const scored = results.results.map(row => {
+      let embedding: number[] = [];
+      try { embedding = JSON.parse(row.embedding as string); } catch { return null; }
+      
+      const similarity = cosineSimilarity(queryVec, embedding);
+      const { embedding: _emb, ...rest } = row;
+      return { ...rest, similarity: Math.round(similarity * 10000) / 10000 };
+    }).filter(r => r !== null && r.similarity >= threshold);
+    
+    // Sort by similarity descending
+    scored.sort((a: any, b: any) => b.similarity - a.similarity);
+    
+    const topResults = scored.slice(0, limit);
+    
+    return c.json({
+      results: topResults,
+      total: scored.length,
+      query: q,
+      mode: 'semantic',
+      model: 'tfidf-256',
+      threshold
+    });
+  } catch (e: any) {
+    return c.json({ results: [], total: 0, query: q, mode: 'semantic', error: e.message });
+  }
+});
+
+// =============================================
+// GET /api/similar/:chunk_id - Find similar documents
+// =============================================
+apiRoutes.get('/similar/:chunk_id', async (c) => {
+  const db = c.env.DB;
+  const chunkId = c.req.param('chunk_id');
+  const limit = parseInt(c.req.query('limit') || '10');
+  
+  try {
+    // Get the source chunk's embedding
+    const source = await db.prepare(`SELECT embedding, text FROM chunks WHERE chunk_id = ?`).bind(chunkId).first<{ embedding: string, text: string }>();
+    if (!source || !source.embedding) {
+      return c.json({ error: 'Chunk not found or no embedding', results: [] }, 404);
+    }
+    
+    const sourceVec: number[] = JSON.parse(source.embedding);
+    
+    // Get all other chunks with embeddings
+    const others = await db.prepare(`
+      SELECT chunk_id, file_path, file_type, project_path, doc_title,
+        location_detail, category, tags, importance, view_count, summary, embedding,
+        substr(text, 1, 200) as snippet
+      FROM chunks WHERE chunk_id != ? AND embedding != '' AND embedding IS NOT NULL
+    `).bind(chunkId).all();
+    
+    const scored = others.results.map(row => {
+      let embedding: number[] = [];
+      try { embedding = JSON.parse(row.embedding as string); } catch { return null; }
+      const similarity = cosineSimilarity(sourceVec, embedding);
+      const { embedding: _emb, ...rest } = row;
+      return { ...rest, similarity: Math.round(similarity * 10000) / 10000 };
+    }).filter(r => r !== null && r.similarity > 0.05);
+    
+    scored.sort((a: any, b: any) => b.similarity - a.similarity);
+    
+    return c.json({ source_id: chunkId, results: scored.slice(0, limit) });
+  } catch (e: any) {
+    return c.json({ error: e.message, results: [] }, 500);
+  }
+});
+
+// =============================================
+// POST /api/ask - AI Q&A (RAG pattern)
+// =============================================
+apiRoutes.post('/ask', async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json<{ question: string; mode?: string }>();
+  const question = body.question || '';
+  
+  if (!question.trim()) {
+    return c.json({ error: 'Question is required' }, 400);
+  }
+  
+  try {
+    // Step 1: Retrieve relevant chunks using BOTH FTS and semantic search
+    const queryVec = textToVector(question);
+    
+    // FTS results
+    let ftsResults: any[] = [];
+    try {
+      const fts = await db.prepare(`
+        SELECT c.chunk_id, c.doc_title, c.file_path, c.file_type, c.location_detail,
+          c.text, c.tags, c.category, c.project_path, c.summary
+        FROM chunks_fts
+        JOIN chunks c ON chunks_fts.rowid = c.rowid
+        WHERE chunks_fts MATCH ?
+        ORDER BY rank LIMIT 5
+      `).bind(question).all();
+      ftsResults = fts.results || [];
+    } catch {}
+    
+    // Semantic results
+    const allChunks = await db.prepare(`
+      SELECT chunk_id, doc_title, file_path, file_type, location_detail,
+        text, tags, category, project_path, summary, embedding
+      FROM chunks WHERE embedding != '' AND embedding IS NOT NULL
+    `).all();
+    
+    const semanticScored = allChunks.results.map(row => {
+      let embedding: number[] = [];
+      try { embedding = JSON.parse(row.embedding as string); } catch { return null; }
+      const similarity = cosineSimilarity(queryVec, embedding);
+      return { ...row, similarity };
+    }).filter(r => r !== null && r.similarity > 0.1);
+    
+    semanticScored.sort((a: any, b: any) => b.similarity - a.similarity);
+    const topSemantic = semanticScored.slice(0, 5);
+    
+    // Merge & deduplicate (prefer semantic order)
+    const seen = new Set<string>();
+    const context: any[] = [];
+    
+    for (const r of [...topSemantic, ...ftsResults]) {
+      if (!seen.has(r.chunk_id as string)) {
+        seen.add(r.chunk_id as string);
+        context.push(r);
+      }
+      if (context.length >= 6) break;
+    }
+    
+    // Step 2: Generate answer
+    // Build context string
+    const contextStr = context.map((c, i) => {
+      const tags = (() => { try { return JSON.parse(c.tags as string || '[]').join(', '); } catch { return ''; } })();
+      return `[출처${i + 1}] ${c.doc_title} (${c.file_type?.toUpperCase()}, ${c.location_detail})\n분류: ${c.category || '-'} | 프로젝트: ${c.project_path || '-'} | 태그: ${tags}\n내용: ${(c.text as string || '').substring(0, 500)}`;
+    }).join('\n\n');
+    
+    // Check for OpenAI API key
+    const apiKey = c.env.OPENAI_API_KEY;
+    
+    if (apiKey) {
+      // Use OpenAI for answer generation
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `당신은 컨설팅 산출물 지식 검색 시스템의 AI 어시스턴트입니다.
+주어진 문서 컨텍스트를 기반으로 질문에 답변하세요.
+답변 시 반드시 출처([출처N])를 명시하세요.
+한국어로 답변하세요. 간결하되 핵심 정보를 빠뜨리지 마세요.
+컨텍스트에 없는 내용은 추측하지 말고 "관련 정보가 없습니다"라고 답하세요.`
+            },
+            {
+              role: 'user',
+              content: `다음 문서 컨텍스트를 기반으로 질문에 답변하세요.\n\n${contextStr}\n\n질문: ${question}`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 1000
+        })
+      });
+      
+      const aiResult = await response.json() as any;
+      const answer = aiResult.choices?.[0]?.message?.content || '답변을 생성할 수 없습니다.';
+      
+      return c.json({
+        question,
+        answer,
+        sources: context.map(c => ({
+          chunk_id: c.chunk_id,
+          doc_title: c.doc_title,
+          file_type: c.file_type,
+          file_path: c.file_path,
+          location_detail: c.location_detail,
+          category: c.category,
+          project_path: c.project_path,
+          summary: c.summary,
+          similarity: c.similarity
+        })),
+        mode: 'ai',
+        model: 'gpt-4o-mini'
+      });
+    } else {
+      // Fallback: Rule-based answer from context
+      const summaries = context.map(c => c.summary || (c.text as string || '').substring(0, 150)).filter(Boolean);
+      const answer = summaries.length > 0
+        ? `관련 문서 ${context.length}건을 찾았습니다.\n\n` + 
+          context.map((c, i) => `${i + 1}. **${c.doc_title}** (${(c.file_type as string || '').toUpperCase()}, ${c.location_detail})\n   ${c.summary || (c.text as string || '').substring(0, 150)}`).join('\n\n') +
+          '\n\n*AI 답변을 활성화하려면 OpenAI API 키를 설정하세요.*'
+        : '관련 문서를 찾을 수 없습니다. 다른 키워드로 질문해 보세요.';
+      
+      return c.json({
+        question,
+        answer,
+        sources: context.map(c => ({
+          chunk_id: c.chunk_id,
+          doc_title: c.doc_title,
+          file_type: c.file_type,
+          file_path: c.file_path,
+          location_detail: c.location_detail,
+          category: c.category,
+          project_path: c.project_path,
+          summary: c.summary,
+          similarity: c.similarity
+        })),
+        mode: 'context-only',
+        hint: 'Set OPENAI_API_KEY for AI-powered answers'
+      });
+    }
+  } catch (e: any) {
+    return c.json({ error: e.message, question }, 500);
+  }
+});
+
+// =============================================
+// GET /api/embedding-stats - Embedding coverage stats
+// =============================================
+apiRoutes.get('/embedding-stats', async (c) => {
+  const db = c.env.DB;
+  try {
+    const total = await db.prepare(`SELECT COUNT(*) as count FROM chunks`).first<{ count: number }>();
+    const withEmbed = await db.prepare(`SELECT COUNT(*) as count FROM chunks WHERE embedding != '' AND embedding IS NOT NULL`).first<{ count: number }>();
+    const models = await db.prepare(`SELECT embed_model, COUNT(*) as count FROM chunks WHERE embed_model != '' GROUP BY embed_model`).all();
+    
+    return c.json({
+      total_chunks: total?.count || 0,
+      with_embeddings: withEmbed?.count || 0,
+      coverage: total?.count ? Math.round((withEmbed?.count || 0) / total.count * 100) : 0,
+      models: models.results
+    });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});

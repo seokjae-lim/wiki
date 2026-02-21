@@ -58,6 +58,9 @@ pageRoutes.get('/', (c) => {
           <button onclick="showView('dashboard')" class="nav-btn px-3 py-1.5 text-xs rounded-md hover:bg-gray-100 transition" data-view="dashboard">
             <i class="fas fa-chart-line mr-1"></i>대시보드
           </button>
+          <button onclick="showView('ask')" class="nav-btn px-3 py-1.5 text-xs rounded-md hover:bg-gray-100 transition" data-view="ask">
+            <i class="fas fa-robot mr-1"></i>AI Q&A
+          </button>
           <button id="seedBtnTop" class="px-3 py-1.5 text-xs text-primary-600 hover:bg-primary-50 rounded-md transition">
             <i class="fas fa-database mr-1"></i>데모 로드
           </button>
@@ -72,6 +75,9 @@ pageRoutes.get('/', (c) => {
             class="search-input w-full pl-11 pr-28 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-primary-500 bg-gray-50 focus:bg-white transition"
             autocomplete="off">
           <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            <button id="searchModeToggle" class="px-2 py-1 text-[11px] rounded transition" title="검색 모드 전환">
+              <i class="fas fa-font mr-0.5"></i>FTS
+            </button>
             <button id="advancedToggle" class="px-2 py-1 text-[11px] text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded transition">
               <i class="fas fa-sliders-h mr-0.5"></i>상세
             </button>
@@ -304,6 +310,62 @@ pageRoutes.get('/', (c) => {
   <div id="dashboardView" class="hidden max-w-7xl mx-auto px-4 py-6">
     <h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-chart-line mr-2 text-primary-600"></i>대시보드</h2>
     <div id="dashboardContent" class="space-y-4"></div>
+  </div>
+
+  <!-- ============ AI Q&A VIEW ============ -->
+  <div id="askView" class="hidden max-w-4xl mx-auto px-4 py-6">
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-purple-600 to-indigo-700 p-5 text-white">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+            <i class="fas fa-robot text-lg"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold">AI Knowledge Assistant</h2>
+            <p class="text-xs text-white/70">컨설팅 산출물 기반 RAG Q&A - 문서 컨텍스트로 답변합니다</p>
+          </div>
+        </div>
+        <div id="embeddingStatus" class="mt-3 text-xs text-white/60">
+          <i class="fas fa-circle-notch fa-spin mr-1"></i>임베딩 상태 확인 중...
+        </div>
+      </div>
+      
+      <!-- Chat area -->
+      <div id="chatHistory" class="p-5 space-y-4 max-h-[500px] overflow-y-auto bg-gray-50">
+        <div class="text-center py-8">
+          <i class="fas fa-comments text-4xl text-gray-200 mb-3"></i>
+          <p class="text-sm text-gray-400">질문을 입력하면 관련 문서를 찾아 답변합니다.</p>
+          <div class="flex flex-wrap justify-center gap-2 mt-4">
+            <button class="ask-suggestion px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition">
+              보건복지부 데이터 현황은?
+            </button>
+            <button class="ask-suggestion px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition">
+              AI 도입률이 가장 높은 분야는?
+            </button>
+            <button class="ask-suggestion px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition">
+              데이터 거버넌스 성숙도 분석 결과
+            </button>
+            <button class="ask-suggestion px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition">
+              클라우드 전환율은?
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Input -->
+      <div class="p-4 border-t border-gray-200 bg-white">
+        <div class="flex gap-2">
+          <input id="askInput" type="text" 
+            placeholder="컨설팅 산출물에 대해 질문하세요..."
+            class="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-purple-500 bg-gray-50 focus:bg-white transition"
+            autocomplete="off">
+          <button id="askBtn" class="px-5 py-2.5 bg-purple-600 text-white text-sm rounded-xl hover:bg-purple-700 transition font-medium shrink-0">
+            <i class="fas fa-paper-plane mr-1"></i>질문
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Toast -->

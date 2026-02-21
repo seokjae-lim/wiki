@@ -1,12 +1,12 @@
 // =============================================
-// Knowledge Wiki v2.0 - Frontend Logic
-// DBpia-style browsing + metadata tagging
+// Knowledge Wiki v3.0 - Frontend Logic
+// Semantic Search + AI Q&A + DBpia-style UI
 // =============================================
 (function() {
   'use strict';
 
   // State
-  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home', browseProject: '' };
+  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home', browseProject: '', searchMode: 'fts' };
 
   function $(s) { return document.querySelector(s); }
   function $$(s) { return document.querySelectorAll(s); }
@@ -19,8 +19,9 @@
   // ============ VIEW MANAGEMENT ============
   window.showView = function(view) {
     state.currentView = view;
-    ['homeView', 'searchView', 'browseView', 'dashboardView'].forEach(function(id) {
-      $('#' + id).classList.add('hidden');
+    ['homeView', 'searchView', 'browseView', 'dashboardView', 'askView'].forEach(function(id) {
+      var el = $('#' + id);
+      if (el) el.classList.add('hidden');
     });
     $$('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
 
@@ -38,6 +39,10 @@
       $('#dashboardView').classList.remove('hidden');
       $('[data-view="dashboard"]').classList.add('active');
       loadDashboard();
+    } else if (view === 'ask') {
+      $('#askView').classList.remove('hidden');
+      $('[data-view="ask"]').classList.add('active');
+      loadAskView();
     }
   };
 
@@ -156,24 +161,36 @@
     showView('search');
     showLoading();
 
-    var params = new URLSearchParams({ q: q, type: state.type, project: state.project, category: state.category, tag: state.tag, doc_stage: state.doc_stage, org: state.org, year: state.year, sort: state.sort, page: String(state.page), limit: String(state.limit) });
-
-    api('/api/search?' + params).then(function(data) {
-      state.results = data.results || [];
-      state.total = data.total || 0;
-      if (state.results.length > 0) renderResults();
-      else showEmpty(q);
-    }).catch(function() { showEmpty(q, '검색 오류. 먼저 "데모 로드"를 클릭하세요.'); });
+    if (state.searchMode === 'semantic') {
+      // Semantic search
+      var params = new URLSearchParams({ q: q, type: state.type, project: state.project, category: state.category, limit: String(state.limit) });
+      api('/api/semantic-search?' + params).then(function(data) {
+        state.results = data.results || [];
+        state.total = data.total || 0;
+        if (state.results.length > 0) renderResults(true);
+        else showEmpty(q, data.hint || '시맨틱 검색 결과 없음. 임베딩이 생성되었는지 확인하세요.');
+      }).catch(function() { showEmpty(q, '시맨틱 검색 오류. 먼저 "데모 로드"를 클릭하세요.'); });
+    } else {
+      // FTS search (original)
+      var params = new URLSearchParams({ q: q, type: state.type, project: state.project, category: state.category, tag: state.tag, doc_stage: state.doc_stage, org: state.org, year: state.year, sort: state.sort, page: String(state.page), limit: String(state.limit) });
+      api('/api/search?' + params).then(function(data) {
+        state.results = data.results || [];
+        state.total = data.total || 0;
+        if (state.results.length > 0) renderResults(false);
+        else showEmpty(q);
+      }).catch(function() { showEmpty(q, '검색 오류. 먼저 "데모 로드"를 클릭하세요.'); });
+    }
   }
 
-  function renderResults() {
+  function renderResults(isSemantic) {
     $('#loadingScreen').classList.add('hidden');
     $('#emptyState').classList.add('hidden');
     $('#resultsContainer').classList.remove('hidden');
 
     var from = (state.page - 1) * state.limit + 1;
     var to = Math.min(state.page * state.limit, state.total);
-    $('#resultsHeader').innerHTML = '<span class="font-semibold text-gray-800">"' + esc(state.query) + '"</span> 검색결과 <span class="font-bold text-primary-600">' + state.total + '건</span>' + (state.total > state.limit ? ' <span class="text-gray-400">(' + from + '-' + to + ')</span>' : '');
+    var modeLabel = isSemantic ? '<span class="text-purple-500 text-xs ml-2"><i class="fas fa-brain mr-0.5"></i>시맨틱</span>' : '<span class="text-blue-500 text-xs ml-2"><i class="fas fa-font mr-0.5"></i>FTS</span>';
+    $('#resultsHeader').innerHTML = '<span class="font-semibold text-gray-800">"' + esc(state.query) + '"</span> 검색결과 <span class="font-bold text-primary-600">' + state.total + '건</span>' + modeLabel + (state.total > state.limit ? ' <span class="text-gray-400">(' + from + '-' + to + ')</span>' : '');
 
     var h = '';
     state.results.forEach(function(r, i) {
@@ -202,6 +219,7 @@
             (tags.length > 0 ? '<div class="flex flex-wrap gap-1 mt-2">' + tags.slice(0, 5).map(function(t) { return '<span class="tag-chip" onclick="event.stopPropagation();searchByTag(\'' + esc(t) + '\')">' + esc(t) + '</span>'; }).join('') + '</div>' : '') +
             // Importance & views
             '<div class="flex items-center gap-3 mt-2 text-[10px] text-gray-400">' +
+              (isSemantic && r.similarity ? '<span title="유사도" class="text-purple-500 font-medium"><i class="fas fa-brain mr-0.5"></i>' + Math.round(r.similarity * 100) + '%</span>' : '') +
               (r.importance ? '<span title="중요도"><i class="fas fa-star mr-0.5 text-yellow-400"></i>' + r.importance + '</span>' : '') +
               (r.view_count ? '<span title="조회수"><i class="fas fa-eye mr-0.5"></i>' + r.view_count + '</span>' : '') +
               (r.mtime ? '<span><i class="fas fa-clock mr-0.5"></i>' + esc(r.mtime).substring(0, 10) + '</span>' : '') +
@@ -316,9 +334,9 @@
         h += '</div></div>';
       }
 
-      // Similar
+      // Similar - enhanced with vector similarity
       if (doc.similar && doc.similar.length > 0) {
-        h += '<div><h4 class="text-[10px] font-semibold text-gray-500 mb-1.5"><i class="fas fa-project-diagram mr-1"></i>유사 주제 문서</h4><div class="space-y-1">';
+        h += '<div><h4 class="text-[10px] font-semibold text-gray-500 mb-1.5"><i class="fas fa-project-diagram mr-1"></i>유사 주제 문서 (카테고리)</h4><div class="space-y-1">';
         doc.similar.forEach(function(s) {
           h += '<div class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-xs" onclick="showDetail(\'' + esc(s.chunk_id) + '\')">' +
             '<span class="type-badge type-' + esc(s.file_type || 'pdf') + '" style="font-size:0.55rem">' + (s.file_type || '').toUpperCase() + '</span>' +
@@ -326,6 +344,26 @@
         });
         h += '</div></div>';
       }
+
+      // Vector similar documents
+      h += '<div id="vectorSimilar"><div class="text-center py-2"><i class="fas fa-spinner fa-spin text-gray-300 text-xs"></i></div></div>';
+
+      // Load vector similar async
+      api('/api/similar/' + chunkId + '?limit=5').then(function(simData) {
+        if (simData.results && simData.results.length > 0) {
+          var sh = '<h4 class="text-[10px] font-semibold text-gray-500 mb-1.5"><i class="fas fa-brain mr-1 text-purple-400"></i>벡터 유사 문서</h4><div class="space-y-1">';
+          simData.results.forEach(function(s) {
+            sh += '<div class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-xs" onclick="showDetail(\'' + esc(s.chunk_id) + '\')">' +
+              '<span class="text-purple-400 font-medium w-8 text-right shrink-0">' + Math.round(s.similarity * 100) + '%</span>' +
+              '<span class="type-badge type-' + esc(s.file_type || 'pdf') + '" style="font-size:0.55rem">' + (s.file_type || '').toUpperCase() + '</span>' +
+              '<span class="text-gray-600 truncate">' + esc(s.doc_title) + '</span></div>';
+          });
+          sh += '</div>';
+          if ($('#vectorSimilar')) $('#vectorSimilar').innerHTML = sh;
+        } else {
+          if ($('#vectorSimilar')) $('#vectorSimilar').innerHTML = '';
+        }
+      }).catch(function() { if ($('#vectorSimilar')) $('#vectorSimilar').innerHTML = ''; });
 
       // Copy path
       h += '<button class="w-full py-2 text-xs text-primary-600 hover:bg-primary-50 rounded-lg border border-primary-200 transition" onclick="copyPath(\'' + esc(doc.file_path) + '\')"><i class="fas fa-copy mr-1"></i>경로 복사</button>';
@@ -627,12 +665,146 @@
 
   // Seed button
   function doSeed() {
+    toast('데모 데이터 로드 중...', 'success');
     apiPost('/api/seed').then(function(r) {
       toast(r.message || '데모 데이터 로드 완료', 'success');
-      loadHome();
+      // Auto-generate embeddings after seeding
+      toast('임베딩 생성 중...', 'success');
+      apiPost('/api/embeddings/generate').then(function(e) {
+        toast('임베딩 생성 완료: ' + (e.count || 0) + '개', 'success');
+        loadHome();
+      }).catch(function() { loadHome(); });
     }).catch(function() { toast('데이터 로드 실패', 'error'); });
   }
   if ($('#seedBtnTop')) $('#seedBtnTop').addEventListener('click', doSeed);
+
+  // ============ SEARCH MODE TOGGLE ============
+  function updateSearchModeBtn() {
+    var btn = $('#searchModeToggle');
+    if (!btn) return;
+    if (state.searchMode === 'semantic') {
+      btn.className = 'px-2 py-1 text-[11px] rounded transition bg-purple-100 text-purple-700 font-medium';
+      btn.innerHTML = '<i class="fas fa-brain mr-0.5"></i>시맨틱';
+    } else {
+      btn.className = 'px-2 py-1 text-[11px] rounded transition text-gray-500 hover:text-primary-600 hover:bg-primary-50';
+      btn.innerHTML = '<i class="fas fa-font mr-0.5"></i>FTS';
+    }
+  }
+
+  if ($('#searchModeToggle')) {
+    $('#searchModeToggle').addEventListener('click', function() {
+      state.searchMode = state.searchMode === 'fts' ? 'semantic' : 'fts';
+      updateSearchModeBtn();
+      if (state.query) { state.page = 1; doSearch(); }
+    });
+    updateSearchModeBtn();
+  }
+
+  // ============ AI Q&A ============
+  function loadAskView() {
+    api('/api/embedding-stats').then(function(s) {
+      var el = $('#embeddingStatus');
+      if (!el) return;
+      if (s.with_embeddings > 0) {
+        el.innerHTML = '<i class="fas fa-check-circle mr-1 text-green-300"></i>임베딩: ' + s.with_embeddings + '/' + s.total_chunks + ' chunks (' + s.coverage + '% 커버리지)' +
+          (s.models && s.models.length ? ' | 모델: ' + s.models.map(function(m) { return m.embed_model + '(' + m.count + ')'; }).join(', ') : '');
+      } else {
+        el.innerHTML = '<i class="fas fa-exclamation-triangle mr-1 text-yellow-300"></i>임베딩 없음. "데모 로드" 버튼을 먼저 클릭하세요.';
+      }
+    }).catch(function() {
+      var el = $('#embeddingStatus');
+      if (el) el.innerHTML = '<i class="fas fa-times-circle mr-1 text-red-300"></i>임베딩 상태를 확인할 수 없습니다.';
+    });
+  }
+
+  function askQuestion(question) {
+    if (!question || !question.trim()) return;
+    
+    var chatEl = $('#chatHistory');
+    if (!chatEl) return;
+
+    // Clear welcome if present
+    if (chatEl.querySelector('.text-center')) chatEl.innerHTML = '';
+
+    // Add user message
+    chatEl.innerHTML += '<div class="flex justify-end"><div class="bg-purple-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 max-w-[80%] text-sm">' + esc(question) + '</div></div>';
+
+    // Add loading
+    var loadId = 'load-' + Date.now();
+    chatEl.innerHTML += '<div id="' + loadId + '" class="flex justify-start"><div class="bg-white border border-gray-200 rounded-2xl rounded-tl-md px-4 py-2.5 max-w-[85%] text-sm"><i class="fas fa-spinner fa-spin text-purple-400 mr-2"></i><span class="text-gray-400">문서를 검색하고 답변을 생성하는 중...</span></div></div>';
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    fetch(API + '/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: question })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      var loadEl = document.getElementById(loadId);
+      if (loadEl) loadEl.remove();
+
+      var answer = data.answer || '답변을 생성할 수 없습니다.';
+      var sources = data.sources || [];
+      var mode = data.mode || 'unknown';
+
+      // Format answer with markdown-like styling
+      var formatted = esc(answer)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+
+      var h = '<div class="flex justify-start"><div class="bg-white border border-gray-200 rounded-2xl rounded-tl-md px-4 py-3 max-w-[85%]">';
+      h += '<div class="text-sm text-gray-800 leading-relaxed">' + formatted + '</div>';
+
+      // Sources
+      if (sources.length > 0) {
+        h += '<div class="mt-3 pt-2 border-t border-gray-100">';
+        h += '<p class="text-[10px] font-semibold text-gray-400 mb-1.5"><i class="fas fa-quote-left mr-1"></i>참조 문서 (' + sources.length + '건)</p>';
+        h += '<div class="space-y-1">';
+        sources.forEach(function(s) {
+          var sim = s.similarity ? ' <span class="text-purple-400">' + Math.round(s.similarity * 100) + '%</span>' : '';
+          h += '<div class="flex items-center gap-1.5 text-[10px] cursor-pointer hover:bg-gray-50 rounded px-1.5 py-0.5" onclick="showDocDetail(\'' + esc(s.chunk_id) + '\')">' +
+            '<span class="type-badge type-' + esc(s.file_type || '') + '" style="font-size:0.5rem">' + (s.file_type || '').toUpperCase() + '</span>' +
+            '<span class="text-gray-600 truncate">' + esc(s.doc_title || '') + '</span>' +
+            '<span class="text-gray-400 shrink-0">' + esc(s.location_detail || '') + '</span>' + sim +
+            '</div>';
+        });
+        h += '</div></div>';
+      }
+
+      // Mode indicator
+      h += '<div class="mt-2 text-[9px] text-gray-300">' +
+        (mode === 'ai' ? '<i class="fas fa-robot mr-0.5"></i>AI 생성 답변' : '<i class="fas fa-list mr-0.5"></i>컨텍스트 기반 답변') +
+        (data.model ? ' (' + data.model + ')' : '') + '</div>';
+      h += '</div></div>';
+
+      chatEl.innerHTML += h;
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }).catch(function(err) {
+      var loadEl = document.getElementById(loadId);
+      if (loadEl) loadEl.remove();
+      chatEl.innerHTML += '<div class="flex justify-start"><div class="bg-red-50 border border-red-200 rounded-2xl rounded-tl-md px-4 py-2.5 max-w-[80%] text-sm text-red-600"><i class="fas fa-exclamation-circle mr-1"></i>오류: ' + esc(err.message || '요청 실패') + '</div></div>';
+      chatEl.scrollTop = chatEl.scrollHeight;
+    });
+  }
+
+  // Ask event listeners
+  if ($('#askBtn')) {
+    $('#askBtn').addEventListener('click', function() {
+      var q = $('#askInput').value.trim();
+      if (q) { askQuestion(q); $('#askInput').value = ''; }
+    });
+  }
+  if ($('#askInput')) {
+    $('#askInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { var q = e.target.value.trim(); if (q) { askQuestion(q); e.target.value = ''; } }
+    });
+  }
+  $$('.ask-suggestion').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var q = b.textContent.trim();
+      if ($('#askInput')) $('#askInput').value = q;
+      askQuestion(q);
+    });
+  });
 
   // ============ INIT ============
   loadHome();

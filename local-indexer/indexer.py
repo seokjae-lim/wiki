@@ -1,8 +1,9 @@
 """
-Knowledge Wiki - Local Indexer v2.0
+Knowledge Wiki - Local Indexer v3.0
 ====================================
 Google Drive 동기화 폴더의 문서를 파싱하여 Knowledge Wiki에 업로드합니다.
 v2.0: 자동 메타데이터 태깅 (키워드 추출, 주제분류, 기관 인식, 문서단계 판별)
+v3.0: 임베딩 생성 + 시맨틱 검색 지원
 
 지원 파일:
   - PPTX (슬라이드 단위)
@@ -15,7 +16,8 @@ v2.0: 자동 메타데이터 태깅 (키워드 추출, 주제분류, 기관 인�
 사용법:
   1. pip install -r requirements.txt
   2. config.py에서 DRIVE_ROOT, WIKI_API_URL 설정
-  3. python indexer.py
+  3. python indexer.py          # 파싱 + 태깅 + 업로드
+  4. python indexer.py --embed  # 업로드 후 서버측 임베딩 생성 트리거
 """
 
 import os
@@ -496,12 +498,31 @@ def upload_chunks(chunks, api_url):
 
 def main():
     print("=" * 60)
-    print("  Knowledge Wiki - Local Indexer v2.0")
-    print("  (with Auto Metadata Tagging)")
+    print("  Knowledge Wiki - Local Indexer v3.0")
+    print("  (Auto Tagging + Embedding Support)")
     print("=" * 60)
     print(f"  Drive Root: {DRIVE_ROOT}")
     print(f"  Wiki API:   {WIKI_API_URL}")
     print()
+
+    # Check for --embed flag (trigger server-side embedding only)
+    embed_only = '--embed' in sys.argv
+    
+    if embed_only:
+        print("[EMBED] Triggering server-side embedding generation...")
+        try:
+            resp = requests.post(f'{WIKI_API_URL}/api/embeddings/generate', timeout=60)
+            data = resp.json()
+            print(f"  Result: {data.get('message', 'Unknown')}")
+            print(f"  Model: {data.get('model', 'N/A')}, Dimensions: {data.get('dimensions', 'N/A')}")
+            
+            # Check stats
+            stats = requests.get(f'{WIKI_API_URL}/api/embedding-stats', timeout=10).json()
+            print(f"  Coverage: {stats.get('with_embeddings', 0)}/{stats.get('total_chunks', 0)} ({stats.get('coverage', 0)}%)")
+        except Exception as e:
+            print(f"  [ERROR] {e}")
+        print("\n[DONE]")
+        return
 
     if not os.path.isdir(DRIVE_ROOT):
         print(f"[ERROR] Drive root not found: {DRIVE_ROOT}")
@@ -511,12 +532,12 @@ def main():
     conn = init_db()
 
     # Scan
-    print("[1/4] Scanning files...")
+    print("[1/5] Scanning files...")
     files = scan_files(DRIVE_ROOT)
     print(f"  Found {len(files)} supported files")
 
     # Check changes
-    print("[2/4] Checking for changes...")
+    print("[2/5] Checking for changes...")
     to_index = []
     for f in files:
         mtime = os.path.getmtime(f)
@@ -530,7 +551,7 @@ def main():
         return
 
     # Parse + Auto-tag + Upload
-    print(f"[3/4] Parsing & auto-tagging {len(to_index)} files...")
+    print(f"[3/5] Parsing & auto-tagging {len(to_index)} files...")
     total_chunks = 0
     errors = 0
     tag_stats = Counter()
@@ -570,7 +591,7 @@ def main():
                     'hash': file_hash,
                 }
                 
-                # ★ v2.0: Auto-tag each chunk
+                # v2.0: Auto-tag each chunk
                 chunk = auto_tag_chunk(chunk, rel_path)
                 chunks.append(chunk)
                 
@@ -594,11 +615,21 @@ def main():
             mark_indexed(conn, str(filepath), mtime_raw, '', 0, status=f'error: {e}')
             errors += 1
 
-    print(f"\n[4/4] Upload complete!")
+    print(f"\n[4/5] Upload complete!")
     print(f"  Total chunks: {total_chunks}")
     print(f"  Errors: {errors}")
     if tag_stats:
         print(f"  Category distribution: {dict(tag_stats.most_common())}")
+
+    # v3.0: Trigger server-side embedding generation
+    print(f"\n[5/5] Triggering embedding generation...")
+    try:
+        resp = requests.post(f'{WIKI_API_URL}/api/embeddings/generate', timeout=120)
+        data = resp.json()
+        print(f"  {data.get('message', 'OK')}")
+    except Exception as e:
+        print(f"  [WARN] Embedding generation request failed: {e}")
+        print(f"  You can generate embeddings later: python indexer.py --embed")
     
     conn.close()
     print("\n[DONE]")
