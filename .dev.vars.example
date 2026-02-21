@@ -1,0 +1,19 @@
+# Knowledge Wiki - OAuth / API Keys
+# 이 파일을 프로젝트 루트에 놓으면 wrangler가 자동으로 읽습니다.
+# 절대 git에 커밋하지 마세요! (.gitignore에 이미 포함됨)
+
+# === 카카오 ===
+KAKAO_CLIENT_ID=여기에_REST_API_키
+KAKAO_CLIENT_SECRET=여기에_보안_코드
+
+# === 네이버 ===
+NAVER_CLIENT_ID=여기에_Client_ID
+NAVER_CLIENT_SECRET=여기에_Client_Secret
+
+# === 구글 ===
+GOOGLE_CLIENT_ID=여기에_클라이언트_ID.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=여기에_클라이언트_보안_비밀번호
+
+# === 기타 ===
+APP_URL=http://localhost:3000
+# OPENAI_API_KEY=sk-xxx  (AI Q&A 기능 활성화용, 선택사항)
