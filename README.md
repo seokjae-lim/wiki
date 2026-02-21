@@ -1,109 +1,110 @@
-# Knowledge Wiki - KM-AI 1.0
+# Knowledge Wiki - KM-AI 2.0
 
 ## Project Overview
-- **Name**: Knowledge Wiki (Consulting Knowledge Search System)
-- **Goal**: Google Drive에 쌓인 컨설팅 산출물(PPT/PDF/엑셀/CSV/노트북)의 **내부 텍스트**까지 검색하여, 정확한 **위치**(슬라이드/페이지/시트/행)를 즉시 찾아주는 내부 지식 검색 위키
-- **Stage**: MVP (1단계: 문자열 기반 Full Text Search)
-
-## What It Does
-- VSCode처럼 모든 문서의 **내용**까지 읽어서 검색
-- 파일명이 아니라 **텍스트 기반** 검색 결과 제공
-- 검색 결과에 **정확한 위치** 표시:
-  - PPTX: 슬라이드 번호
-  - PDF: 페이지 번호
-  - XLSX: 시트명 + 행 번호
-  - CSV: 행 번호
-  - ipynb: 셀 번호 (코드/마크다운 구분)
-- 프로젝트(사업)별 필터링
-- 파일 유형별 필터링
-- 검색어 하이라이트
-- 경로 복사
-
-## Architecture
-```
-[Google Drive Desktop 동기화 폴더]
-        |
-        v
-[Local Python Indexer]     <-- 로컬 PC에서 실행
-  - 파일 스캔 (증분)
-  - 텍스트 추출 (PPTX/PDF/XLSX/CSV/ipynb)
-  - API로 업로드
-        |
-        v
-[Knowledge Wiki (Cloudflare Pages)]
-  - Hono Backend + D1 Database
-  - FTS5 Full-Text Search
-  - Web UI (검색/필터/상세보기)
-```
-
-## Tech Stack
-- **Backend**: Hono (TypeScript) + Cloudflare Workers
-- **Database**: Cloudflare D1 (SQLite + FTS5)
-- **Frontend**: Tailwind CSS + Vanilla JS
-- **Local Indexer**: Python (python-pptx, PyMuPDF, openpyxl)
-- **Deployment**: Cloudflare Pages
+- **Name**: Knowledge Wiki (KM-AI)
+- **Version**: 2.0 (Auto Metadata Tagging + DBpia-style UI)
+- **Goal**: Google Drive 컨설팅 산출물(PPT, PDF, Excel, CSV, ipynb, DOCX)의 내부 텍스트를 슬라이드/페이지/행/셀 단위로 전문 검색하고, 자동 태깅된 메타데이터로 주제별 탐색이 가능한 지식 플랫폼
+- **Tech Stack**: Hono + TypeScript + Cloudflare Workers (D1 SQLite FTS5) + Tailwind CSS + Python Indexer
 
 ## URLs
-- **Demo**: (배포 후 추가)
-- **API**: `/api/search`, `/api/doc/:id`, `/api/stats`
+- **Sandbox**: https://3000-ix7c266jwx6te70xnjbgs-c07dda5e.sandbox.novita.ai
+- **Production**: (Cloudflare Pages 배포 대기)
+
+## Completed Features (v2.0)
+
+### Web Application
+1. **전문 검색 (FTS5)**: 모든 파일 유형의 텍스트를 슬라이드/페이지/행/셀 단위로 검색
+2. **자동 메타데이터 태깅**: TF 기반 키워드 태그, 주제분류, 기관 인식, 문서단계 판별, 중요도 점수
+3. **4개 뷰 SPA**: 홈, 검색결과, 주제별 브라우징, 대시보드
+4. **상세 필터**: 파일유형, 프로젝트, 주제분류, 문서단계, 발주기관, 연도별 필터
+5. **정렬**: 관련도, 최신순, 인기순, 중요도순
+6. **문서 상세 패널**: 서지정보, 요약, 태그, 관련/유사 문서 추천
+7. **인기 태그 클라우드**: 태그 빈도 기반 시각화
+8. **대시보드**: 파일유형별/주제별/단계별/기관별 통계, 인기 문서 Top 10
+
+### Backend API
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/search` | GET | 전문 검색 (FTS5 MATCH + 필터 + 페이지네이션) |
+| `/api/browse` | GET | 필터 기반 브라우징 (FTS 불필요) |
+| `/api/doc/:chunk_id` | GET | 문서 상세 + 조회수 증가 + 관련/유사 추천 |
+| `/api/stats` | GET | 통계 (유형/분류/단계/기관/연도/인기) |
+| `/api/tags` | GET | 태그 클라우드 |
+| `/api/categories` | GET | 주제분류 목록 |
+| `/api/projects` | GET | 프로젝트 목록 |
+| `/api/filetypes` | GET | 파일 유형 목록 |
+| `/api/orgs` | GET | 발주기관 목록 |
+| `/api/trending` | GET | 인기/최근 인덱싱 문서 |
+| `/api/chunks` | POST | 청크 일괄 업로드 |
+| `/api/chunks` | DELETE | 전체 삭제 |
+| `/api/seed` | POST | 데모 데이터 로드 (28 chunks) |
+
+### Local Python Indexer (v2.0)
+- Google Drive 동기화 폴더 스캔 + 증분 인덱싱
+- 6개 파일 형식 파싱: PPTX, PDF, XLSX, CSV, ipynb, DOCX
+- **자동 태깅**: TF 키워드 추출, 주제분류 (AI/데이터/거버넌스/인프라/보안/전략/사업관리)
+- **기관 인식**: NIA, 과기정통부, 행안부 등 10개 기관 사전
+- **문서단계 판별**: RFP/제안서/착수보고/.../분석코드
+- **중요도 점수**: 문서단계, 텍스트 길이, 핵심 키워드 가중치 기반
+
+## Data Architecture
+- **Database**: Cloudflare D1 SQLite (FTS5 virtual table)
+- **Schema**:
+  - `chunks` table: chunk_id, file_path, file_type, project_path, doc_title, location_type/value/detail, text, mtime, hash, tags(JSON), category, sub_category, author, org, doc_stage, doc_year, summary, importance, view_count, indexed_at
+  - `chunks_fts` FTS5 virtual table on text column
+  - Sync triggers (insert/update/delete)
+- **Demo Data**: 28 chunks across 5 projects, 12 files (pptx 13, xlsx 6, pdf 5, csv 2, ipynb 2)
 
 ## Quick Start
 
-### 1. Web UI (검색 서비스)
+### Web Application (Sandbox)
 ```bash
 npm install
 npm run build
 npm run db:migrate:local
-npm run dev:sandbox
-# http://localhost:3000 접속
-# "현황" 버튼 > "데모 데이터 로드" 클릭
+pm2 start ecosystem.config.cjs
+curl -X POST http://localhost:3000/api/seed  # Load demo data
 ```
 
-### 2. Local Indexer (문서 인덱싱)
+### Local Python Indexer
 ```bash
 cd local-indexer
 pip install -r requirements.txt
-# config.py에서 DRIVE_ROOT 경로 설정
+# Edit config.py: set DRIVE_ROOT and WIKI_API_URL
 python indexer.py
 ```
 
-## API Reference
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/search?q=&type=&project=&sort=&page=&limit=` | 전체 텍스트 검색 |
-| GET | `/api/doc/:chunk_id` | 청크 상세 조회 |
-| GET | `/api/stats` | 인덱싱 통계 |
-| GET | `/api/projects` | 프로젝트 목록 |
-| GET | `/api/filetypes` | 파일 유형 목록 |
-| POST | `/api/chunks` | 청크 벌크 업로드 (인덱서용) |
-| POST | `/api/seed` | 데모 데이터 시드 |
-| DELETE | `/api/chunks` | 전체 청크 삭제 |
-
-## Data Schema (Standard Record)
-```json
-{
-  "chunk_id": "unique-id",
-  "file_path": "국가중점데이터/03. 제안서/최종보고.pptx",
-  "file_type": "pptx",
-  "project_path": "국가중점데이터",
-  "doc_title": "최종보고",
-  "location_type": "slide",
-  "location_value": "12",
-  "location_detail": "Slide 12",
-  "text": "기관별 데이터 인프라 현황 분석...",
-  "mtime": "2025-12-15T10:30:00",
-  "hash": "abc123..."
-}
+## File Structure
+```
+webapp/
+  src/
+    index.tsx        # Hono app entry
+    api.ts           # All API routes + demo data
+    pages.tsx        # HTML page (SPA shell)
+  public/
+    static/
+      wiki.js        # Frontend JS (views, search, browse, dashboard)
+      wiki.css       # Styles (type badges, tag chips, animations)
+    favicon.svg      # Favicon
+  local-indexer/
+    indexer.py       # Python indexer v2.0 (auto-tagging)
+    config.py        # Configuration
+    requirements.txt # Python deps
+  migrations/
+    0001_initial_schema.sql
+    0002_metadata_tags.sql
+  wrangler.jsonc     # Cloudflare config
+  ecosystem.config.cjs # PM2 config
 ```
 
 ## Roadmap
-- [x] 1단계: Full Text Search MVP
-- [ ] 2단계: 의미검색(RAG) - 벡터 임베딩 추가
-- [ ] 3단계: 온톨로지 설계 + 그래프 시각화
-- [ ] 4단계: 에이전틱 AI (제안서 초안 자동 생성)
+- [x] Phase 1: MVP - FTS5 전문검색 + 위치정보
+- [x] Phase 2: 자동 메타데이터 태깅 + DBpia 스타일 UI
+- [ ] Phase 3: 벡터 임베딩 + 시맨틱 검색 (RAG)
+- [ ] Phase 4: 온톨로지/지식그래프 (GraphRAG)
+- [ ] Phase 5: AI 에이전트 (요약/제안서 초안 자동작성)
 
 ## Deployment
 - **Platform**: Cloudflare Pages
-- **Status**: MVP (개발 중)
+- **Status**: Sandbox 운영 중 (Cloudflare 배포 대기)
 - **Last Updated**: 2026-02-21

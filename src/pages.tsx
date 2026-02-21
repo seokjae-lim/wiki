@@ -15,6 +15,7 @@ pageRoutes.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Knowledge Wiki - KM-AI 2.0</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <link href="/static/wiki.css" rel="stylesheet">
@@ -271,7 +272,13 @@ pageRoutes.get('/', (c) => {
   <!-- ============ BROWSE VIEW ============ -->
   <div id="browseView" class="hidden max-w-7xl mx-auto px-4 py-6">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold text-gray-800"><i class="fas fa-th-large mr-2 text-primary-600"></i>주제별 브라우징</h2>
+      <div>
+        <h2 class="text-lg font-bold text-gray-800"><i class="fas fa-th-large mr-2 text-primary-600"></i>주제별 브라우징</h2>
+        <div id="browseActiveProject" class="hidden mt-1 text-xs text-primary-600">
+          <i class="fas fa-folder-open mr-1"></i><span id="browseProjectLabel"></span>
+          <button onclick="clearBrowseProject()" class="ml-2 text-gray-400 hover:text-red-500"><i class="fas fa-times-circle"></i></button>
+        </div>
+      </div>
       <div class="flex gap-2">
         <select id="browseCategory" class="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white">
           <option value="">전체 주제</option>

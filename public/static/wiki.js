@@ -6,7 +6,7 @@
   'use strict';
 
   // State
-  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home' };
+  var state = { query: '', type: '', project: '', category: '', tag: '', doc_stage: '', org: '', year: '', sort: 'relevance', page: 1, limit: 20, total: 0, results: [], currentView: 'home', browseProject: '' };
 
   function $(s) { return document.querySelector(s); }
   function $$(s) { return document.querySelectorAll(s); }
@@ -348,8 +348,9 @@
     var cat = $('#browseCategory') ? $('#browseCategory').value : '';
     var stage = $('#browseStage') ? $('#browseStage').value : '';
     var sort = $('#browseSort') ? $('#browseSort').value : 'mtime';
+    var proj = state.browseProject || '';
 
-    var params = new URLSearchParams({ category: cat, doc_stage: stage, sort: sort, limit: '30' });
+    var params = new URLSearchParams({ category: cat, doc_stage: stage, sort: sort, project: proj, limit: '30' });
     api('/api/browse?' + params).then(function(d) {
       if (!d.results || d.results.length === 0) { $('#browseResults').innerHTML = '<div class="col-span-3 text-center py-8 text-gray-400"><i class="fas fa-inbox text-3xl mb-2"></i><p class="text-sm">데이터 없음</p></div>'; return; }
       var h = '';
@@ -508,6 +509,9 @@
   window.searchByTag = function(tag) {
     $('#searchInput').value = tag;
     state.tag = '';
+    state.type = '';
+    state.project = '';
+    state.category = '';
     state.page = 1;
     doSearch();
   };
@@ -519,9 +523,21 @@
   };
 
   window.browseByProject = function(proj) {
-    state.project = proj;
+    state.browseProject = proj;
     if ($('#browseCategory')) $('#browseCategory').value = '';
+    if ($('#browseStage')) $('#browseStage').value = '';
     showView('browse');
+    // Show active project label
+    if (proj && $('#browseActiveProject') && $('#browseProjectLabel')) {
+      $('#browseActiveProject').classList.remove('hidden');
+      $('#browseProjectLabel').textContent = proj;
+    }
+    loadBrowse();
+  };
+
+  window.clearBrowseProject = function() {
+    state.browseProject = '';
+    if ($('#browseActiveProject')) $('#browseActiveProject').classList.add('hidden');
     loadBrowse();
   };
 
