@@ -7,7 +7,7 @@ type Bindings = {
 export const apiRoutes = new Hono<{ Bindings: Bindings }>()
 
 // =============================================
-// GET /api/search - Full Text Search
+// GET /api/search - Full Text Search (Enhanced)
 // =============================================
 apiRoutes.get('/search', async (c) => {
   const db = c.env.DB
@@ -15,7 +15,12 @@ apiRoutes.get('/search', async (c) => {
   const path = c.req.query('path') || ''
   const type = c.req.query('type') || ''
   const project = c.req.query('project') || ''
-  const sort = c.req.query('sort') || 'relevance' // relevance | mtime
+  const category = c.req.query('category') || ''
+  const tag = c.req.query('tag') || ''
+  const doc_stage = c.req.query('doc_stage') || ''
+  const org = c.req.query('org') || ''
+  const year = c.req.query('year') || ''
+  const sort = c.req.query('sort') || 'relevance'
   const page = parseInt(c.req.query('page') || '1')
   const limit = parseInt(c.req.query('limit') || '20')
   const offset = (page - 1) * limit
@@ -24,43 +29,13 @@ apiRoutes.get('/search', async (c) => {
     return c.json({ results: [], total: 0, page, limit, query: q })
   }
 
-  // Build WHERE clauses
-  const conditions: string[] = []
-  const params: any[] = []
-
-  // Full-text search on text content
-  conditions.push(`chunks_fts MATCH ?`)
-  params.push(q)
-
-  let filterConditions: string[] = []
-  let filterParams: any[] = []
-
-  if (path) {
-    filterConditions.push(`c.file_path LIKE ?`)
-    filterParams.push(`%${path}%`)
-  }
-  if (type) {
-    filterConditions.push(`c.file_type = ?`)
-    filterParams.push(type)
-  }
-  if (project) {
-    filterConditions.push(`c.project_path LIKE ?`)
-    filterParams.push(`%${project}%`)
-  }
-
-  // FTS5 query with JOIN for filters
   let sql = `
     SELECT 
-      c.chunk_id,
-      c.file_path,
-      c.file_type,
-      c.project_path,
-      c.doc_title,
-      c.location_type,
-      c.location_value,
-      c.location_detail,
+      c.chunk_id, c.file_path, c.file_type, c.project_path,
+      c.doc_title, c.location_type, c.location_value, c.location_detail,
       snippet(chunks_fts, 0, '<mark>', '</mark>', '...', 40) as snippet,
-      c.mtime,
+      c.mtime, c.tags, c.category, c.sub_category, c.author, c.org,
+      c.doc_stage, c.doc_year, c.importance, c.view_count,
       rank
     FROM chunks_fts
     JOIN chunks c ON chunks_fts.rowid = c.rowid
@@ -68,24 +43,19 @@ apiRoutes.get('/search', async (c) => {
   `
   const queryParams: any[] = [q]
 
-  if (path) {
-    sql += ` AND c.file_path LIKE ?`
-    queryParams.push(`%${path}%`)
-  }
-  if (type) {
-    sql += ` AND c.file_type = ?`
-    queryParams.push(type)
-  }
-  if (project) {
-    sql += ` AND c.project_path LIKE ?`
-    queryParams.push(`%${project}%`)
-  }
+  if (path) { sql += ` AND c.file_path LIKE ?`; queryParams.push(`%${path}%`) }
+  if (type) { sql += ` AND c.file_type = ?`; queryParams.push(type) }
+  if (project) { sql += ` AND c.project_path LIKE ?`; queryParams.push(`%${project}%`) }
+  if (category) { sql += ` AND c.category = ?`; queryParams.push(category) }
+  if (tag) { sql += ` AND c.tags LIKE ?`; queryParams.push(`%${tag}%`) }
+  if (doc_stage) { sql += ` AND c.doc_stage = ?`; queryParams.push(doc_stage) }
+  if (org) { sql += ` AND c.org LIKE ?`; queryParams.push(`%${org}%`) }
+  if (year) { sql += ` AND c.doc_year = ?`; queryParams.push(year) }
 
-  if (sort === 'mtime') {
-    sql += ` ORDER BY c.mtime DESC`
-  } else {
-    sql += ` ORDER BY rank`
-  }
+  if (sort === 'mtime') sql += ` ORDER BY c.mtime DESC`
+  else if (sort === 'views') sql += ` ORDER BY c.view_count DESC`
+  else if (sort === 'importance') sql += ` ORDER BY c.importance DESC`
+  else sql += ` ORDER BY rank`
 
   sql += ` LIMIT ? OFFSET ?`
   queryParams.push(limit, offset)
@@ -93,66 +63,117 @@ apiRoutes.get('/search', async (c) => {
   try {
     const results = await db.prepare(sql).bind(...queryParams).all()
 
-    // Count query
     let countSql = `
-      SELECT COUNT(*) as total
-      FROM chunks_fts
+      SELECT COUNT(*) as total FROM chunks_fts
       JOIN chunks c ON chunks_fts.rowid = c.rowid
       WHERE chunks_fts MATCH ?
     `
     const countParams: any[] = [q]
-    if (path) {
-      countSql += ` AND c.file_path LIKE ?`
-      countParams.push(`%${path}%`)
-    }
-    if (type) {
-      countSql += ` AND c.file_type = ?`
-      countParams.push(type)
-    }
-    if (project) {
-      countSql += ` AND c.project_path LIKE ?`
-      countParams.push(`%${project}%`)
-    }
+    if (path) { countSql += ` AND c.file_path LIKE ?`; countParams.push(`%${path}%`) }
+    if (type) { countSql += ` AND c.file_type = ?`; countParams.push(type) }
+    if (project) { countSql += ` AND c.project_path LIKE ?`; countParams.push(`%${project}%`) }
+    if (category) { countSql += ` AND c.category = ?`; countParams.push(category) }
+    if (tag) { countSql += ` AND c.tags LIKE ?`; countParams.push(`%${tag}%`) }
+    if (doc_stage) { countSql += ` AND c.doc_stage = ?`; countParams.push(doc_stage) }
+    if (org) { countSql += ` AND c.org LIKE ?`; countParams.push(`%${org}%`) }
+    if (year) { countSql += ` AND c.doc_year = ?`; countParams.push(year) }
 
     const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>()
 
-    return c.json({
-      results: results.results,
-      total: countResult?.total || 0,
-      page,
-      limit,
-      query: q
-    })
+    return c.json({ results: results.results, total: countResult?.total || 0, page, limit, query: q })
   } catch (e: any) {
-    // If FTS table doesn't exist yet, return empty
     return c.json({ results: [], total: 0, page, limit, query: q, error: e.message })
   }
 })
 
 // =============================================
-// GET /api/doc/:chunk_id - Document Detail
+// GET /api/browse - Browse without FTS (filter only)
+// =============================================
+apiRoutes.get('/browse', async (c) => {
+  const db = c.env.DB
+  const type = c.req.query('type') || ''
+  const project = c.req.query('project') || ''
+  const category = c.req.query('category') || ''
+  const tag = c.req.query('tag') || ''
+  const doc_stage = c.req.query('doc_stage') || ''
+  const org = c.req.query('org') || ''
+  const year = c.req.query('year') || ''
+  const sort = c.req.query('sort') || 'mtime'
+  const page = parseInt(c.req.query('page') || '1')
+  const limit = parseInt(c.req.query('limit') || '20')
+  const offset = (page - 1) * limit
+
+  let conditions: string[] = []
+  let params: any[] = []
+
+  if (type) { conditions.push(`file_type = ?`); params.push(type) }
+  if (project) { conditions.push(`project_path LIKE ?`); params.push(`%${project}%`) }
+  if (category) { conditions.push(`category = ?`); params.push(category) }
+  if (tag) { conditions.push(`tags LIKE ?`); params.push(`%${tag}%`) }
+  if (doc_stage) { conditions.push(`doc_stage = ?`); params.push(doc_stage) }
+  if (org) { conditions.push(`org LIKE ?`); params.push(`%${org}%`) }
+  if (year) { conditions.push(`doc_year = ?`); params.push(year) }
+
+  const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
+
+  let orderBy = 'ORDER BY mtime DESC'
+  if (sort === 'views') orderBy = 'ORDER BY view_count DESC'
+  else if (sort === 'importance') orderBy = 'ORDER BY importance DESC'
+  else if (sort === 'title') orderBy = 'ORDER BY doc_title ASC'
+
+  try {
+    const sql = `SELECT chunk_id, file_path, file_type, project_path, doc_title,
+      location_type, location_value, location_detail, 
+      substr(text, 1, 200) as snippet, mtime, tags, category, sub_category,
+      author, org, doc_stage, doc_year, importance, view_count
+      FROM chunks ${where} ${orderBy} LIMIT ? OFFSET ?`
+    const results = await db.prepare(sql).bind(...params, limit, offset).all()
+
+    const countSql = `SELECT COUNT(*) as total FROM chunks ${where}`
+    const countResult = await db.prepare(countSql).bind(...params).first<{ total: number }>()
+
+    return c.json({ results: results.results, total: countResult?.total || 0, page, limit })
+  } catch (e: any) {
+    return c.json({ results: [], total: 0, page, limit, error: e.message })
+  }
+})
+
+// =============================================
+// GET /api/doc/:chunk_id - Document Detail + view count++
 // =============================================
 apiRoutes.get('/doc/:chunk_id', async (c) => {
   const db = c.env.DB
   const chunkId = c.req.param('chunk_id')
 
   try {
-    const result = await db.prepare(`
-      SELECT * FROM chunks WHERE chunk_id = ?
-    `).bind(chunkId).first()
+    // Increment view count
+    await db.prepare(`UPDATE chunks SET view_count = view_count + 1 WHERE chunk_id = ?`).bind(chunkId).run()
 
-    if (!result) {
-      return c.json({ error: 'Chunk not found' }, 404)
-    }
+    const result = await db.prepare(`SELECT * FROM chunks WHERE chunk_id = ?`).bind(chunkId).first()
+    if (!result) return c.json({ error: 'Chunk not found' }, 404)
 
-    return c.json(result)
+    // Get related chunks from same file
+    const related = await db.prepare(`
+      SELECT chunk_id, doc_title, location_detail, substr(text, 1, 100) as snippet
+      FROM chunks WHERE file_path = ? AND chunk_id != ? ORDER BY location_value LIMIT 5
+    `).bind(result.file_path as string, chunkId).all()
+
+    // Get similar category chunks
+    const similar = await db.prepare(`
+      SELECT chunk_id, doc_title, file_path, location_detail, category, 
+        substr(text, 1, 100) as snippet
+      FROM chunks WHERE category = ? AND chunk_id != ? AND category != ''
+      ORDER BY importance DESC LIMIT 5
+    `).bind(result.category as string, chunkId).all()
+
+    return c.json({ ...result, related: related.results, similar: similar.results })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
 })
 
 // =============================================
-// GET /api/stats - Index Statistics
+// GET /api/stats - Enhanced Statistics
 // =============================================
 apiRoutes.get('/stats', async (c) => {
   const db = c.env.DB
@@ -168,6 +189,26 @@ apiRoutes.get('/stats', async (c) => {
       SELECT project_path, COUNT(*) as chunk_count, COUNT(DISTINCT file_path) as file_count 
       FROM chunks GROUP BY project_path ORDER BY chunk_count DESC LIMIT 20
     `).all()
+    const byCategory = await db.prepare(`
+      SELECT category, COUNT(*) as count FROM chunks 
+      WHERE category != '' GROUP BY category ORDER BY count DESC
+    `).all()
+    const byStage = await db.prepare(`
+      SELECT doc_stage, COUNT(*) as count FROM chunks 
+      WHERE doc_stage != '' GROUP BY doc_stage ORDER BY count DESC
+    `).all()
+    const byOrg = await db.prepare(`
+      SELECT org, COUNT(*) as count FROM chunks 
+      WHERE org != '' GROUP BY org ORDER BY count DESC LIMIT 10
+    `).all()
+    const byYear = await db.prepare(`
+      SELECT doc_year, COUNT(*) as count FROM chunks 
+      WHERE doc_year != '' GROUP BY doc_year ORDER BY doc_year DESC
+    `).all()
+    const topViewed = await db.prepare(`
+      SELECT chunk_id, doc_title, file_type, project_path, view_count, category
+      FROM chunks ORDER BY view_count DESC LIMIT 10
+    `).all()
     const lastIndexed = await db.prepare(`SELECT MAX(indexed_at) as last FROM chunks`).first<{ last: string }>()
 
     return c.json({
@@ -175,34 +216,76 @@ apiRoutes.get('/stats', async (c) => {
       total_files: totalFiles?.count || 0,
       by_type: byType.results,
       by_project: byProject.results,
+      by_category: byCategory.results,
+      by_stage: byStage.results,
+      by_org: byOrg.results,
+      by_year: byYear.results,
+      top_viewed: topViewed.results,
       last_indexed: lastIndexed?.last || null
     })
   } catch (e: any) {
     return c.json({
-      total_chunks: 0,
-      total_files: 0,
-      by_type: [],
-      by_project: [],
-      last_indexed: null,
-      error: e.message
+      total_chunks: 0, total_files: 0,
+      by_type: [], by_project: [], by_category: [], by_stage: [],
+      by_org: [], by_year: [], top_viewed: [],
+      last_indexed: null, error: e.message
     })
   }
 })
 
 // =============================================
-// GET /api/projects - Project List (for filters)
+// GET /api/tags - Tag Cloud
+// =============================================
+apiRoutes.get('/tags', async (c) => {
+  const db = c.env.DB
+  try {
+    const results = await db.prepare(`SELECT tags FROM chunks WHERE tags != '[]' AND tags != ''`).all()
+    const tagCount: Record<string, number> = {}
+    for (const row of results.results) {
+      try {
+        const tags = JSON.parse(row.tags as string)
+        if (Array.isArray(tags)) {
+          tags.forEach((t: string) => { tagCount[t] = (tagCount[t] || 0) + 1 })
+        }
+      } catch {}
+    }
+    const sorted = Object.entries(tagCount)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+    return c.json({ tags: sorted })
+  } catch (e: any) {
+    return c.json({ tags: [], error: e.message })
+  }
+})
+
+// =============================================
+// GET /api/categories - Category List
+// =============================================
+apiRoutes.get('/categories', async (c) => {
+  const db = c.env.DB
+  try {
+    const result = await db.prepare(`
+      SELECT category, sub_category, COUNT(*) as count, COUNT(DISTINCT file_path) as file_count
+      FROM chunks WHERE category != ''
+      GROUP BY category, sub_category ORDER BY count DESC
+    `).all()
+    return c.json({ categories: result.results })
+  } catch (e: any) {
+    return c.json({ categories: [] })
+  }
+})
+
+// =============================================
+// GET /api/projects - Project List
 // =============================================
 apiRoutes.get('/projects', async (c) => {
   const db = c.env.DB
-
   try {
     const result = await db.prepare(`
-      SELECT DISTINCT project_path, COUNT(*) as chunk_count, COUNT(DISTINCT file_path) as file_count
-      FROM chunks
-      GROUP BY project_path
-      ORDER BY project_path
+      SELECT DISTINCT project_path, COUNT(*) as chunk_count, COUNT(DISTINCT file_path) as file_count,
+        MIN(doc_year) as start_year, MAX(doc_year) as end_year
+      FROM chunks GROUP BY project_path ORDER BY project_path
     `).all()
-
     return c.json({ projects: result.results })
   } catch (e: any) {
     return c.json({ projects: [] })
@@ -210,19 +293,15 @@ apiRoutes.get('/projects', async (c) => {
 })
 
 // =============================================
-// GET /api/filetypes - File Type List (for filters)
+// GET /api/filetypes - File Type List
 // =============================================
 apiRoutes.get('/filetypes', async (c) => {
   const db = c.env.DB
-
   try {
     const result = await db.prepare(`
       SELECT DISTINCT file_type, COUNT(*) as count
-      FROM chunks
-      GROUP BY file_type
-      ORDER BY count DESC
+      FROM chunks GROUP BY file_type ORDER BY count DESC
     `).all()
-
     return c.json({ filetypes: result.results })
   } catch (e: any) {
     return c.json({ filetypes: [] })
@@ -230,7 +309,50 @@ apiRoutes.get('/filetypes', async (c) => {
 })
 
 // =============================================
-// POST /api/chunks - Bulk Upload Chunks (from local indexer)
+// GET /api/orgs - Organization List
+// =============================================
+apiRoutes.get('/orgs', async (c) => {
+  const db = c.env.DB
+  try {
+    const result = await db.prepare(`
+      SELECT org, COUNT(*) as count, COUNT(DISTINCT project_path) as project_count
+      FROM chunks WHERE org != '' GROUP BY org ORDER BY count DESC
+    `).all()
+    return c.json({ orgs: result.results })
+  } catch (e: any) {
+    return c.json({ orgs: [] })
+  }
+})
+
+// =============================================
+// GET /api/trending - Trending/Popular Content
+// =============================================
+apiRoutes.get('/trending', async (c) => {
+  const db = c.env.DB
+  try {
+    const popular = await db.prepare(`
+      SELECT chunk_id, doc_title, file_type, file_path, project_path, 
+        category, tags, view_count, location_detail
+      FROM chunks ORDER BY view_count DESC LIMIT 10
+    `).all()
+
+    const recentlyIndexed = await db.prepare(`
+      SELECT chunk_id, doc_title, file_type, file_path, project_path,
+        category, tags, indexed_at, location_detail
+      FROM chunks ORDER BY indexed_at DESC LIMIT 10
+    `).all()
+
+    return c.json({
+      popular: popular.results,
+      recently_indexed: recentlyIndexed.results
+    })
+  } catch (e: any) {
+    return c.json({ popular: [], recently_indexed: [], error: e.message })
+  }
+})
+
+// =============================================
+// POST /api/chunks - Bulk Upload (Enhanced with metadata)
 // =============================================
 apiRoutes.post('/chunks', async (c) => {
   const db = c.env.DB
@@ -243,7 +365,6 @@ apiRoutes.post('/chunks', async (c) => {
   let inserted = 0
   let errors: string[] = []
 
-  // Process in batches
   const batchSize = 50
   for (let i = 0; i < body.chunks.length; i += batchSize) {
     const batch = body.chunks.slice(i, i + batchSize)
@@ -251,8 +372,10 @@ apiRoutes.post('/chunks', async (c) => {
       return db.prepare(`
         INSERT OR REPLACE INTO chunks 
         (chunk_id, file_path, file_type, project_path, doc_title, 
-         location_type, location_value, location_detail, text, mtime, hash, indexed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+         location_type, location_value, location_detail, text, mtime, hash,
+         tags, category, sub_category, author, org, doc_stage, doc_year,
+         summary, importance, indexed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).bind(
         chunk.chunk_id,
         chunk.file_path,
@@ -264,7 +387,16 @@ apiRoutes.post('/chunks', async (c) => {
         chunk.location_detail || '',
         chunk.text || '',
         chunk.mtime || '',
-        chunk.hash || ''
+        chunk.hash || '',
+        JSON.stringify(chunk.tags || []),
+        chunk.category || '',
+        chunk.sub_category || '',
+        chunk.author || '',
+        chunk.org || '',
+        chunk.doc_stage || '',
+        chunk.doc_year || '',
+        chunk.summary || '',
+        chunk.importance || 50
       )
     })
 
@@ -280,7 +412,7 @@ apiRoutes.post('/chunks', async (c) => {
 })
 
 // =============================================
-// DELETE /api/chunks - Clear all chunks
+// DELETE /api/chunks - Clear all
 // =============================================
 apiRoutes.delete('/chunks', async (c) => {
   const db = c.env.DB
@@ -293,431 +425,405 @@ apiRoutes.delete('/chunks', async (c) => {
 })
 
 // =============================================
-// POST /api/seed - Seed Demo Data
+// POST /api/seed - Enhanced Demo Data
 // =============================================
 apiRoutes.post('/seed', async (c) => {
   const db = c.env.DB
-
   const demoChunks = getDemoData()
 
-  const statements = demoChunks.map(chunk => {
-    return db.prepare(`
-      INSERT OR REPLACE INTO chunks 
-      (chunk_id, file_path, file_type, project_path, doc_title, 
-       location_type, location_value, location_detail, text, mtime, hash, indexed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).bind(
-      chunk.chunk_id,
-      chunk.file_path,
-      chunk.file_type,
-      chunk.project_path,
-      chunk.doc_title,
-      chunk.location_type,
-      chunk.location_value,
-      chunk.location_detail,
-      chunk.text,
-      chunk.mtime,
-      chunk.hash
-    )
-  })
-
-  try {
-    await db.batch(statements)
-    return c.json({ message: `Seeded ${demoChunks.length} demo chunks` })
-  } catch (e: any) {
-    return c.json({ error: e.message }, 500)
+  const batchSize = 20
+  let inserted = 0
+  for (let i = 0; i < demoChunks.length; i += batchSize) {
+    const batch = demoChunks.slice(i, i + batchSize)
+    const statements = batch.map(chunk => {
+      return db.prepare(`
+        INSERT OR REPLACE INTO chunks 
+        (chunk_id, file_path, file_type, project_path, doc_title, 
+         location_type, location_value, location_detail, text, mtime, hash,
+         tags, category, sub_category, author, org, doc_stage, doc_year,
+         summary, importance, view_count, indexed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).bind(
+        chunk.chunk_id, chunk.file_path, chunk.file_type, chunk.project_path,
+        chunk.doc_title, chunk.location_type, chunk.location_value, chunk.location_detail,
+        chunk.text, chunk.mtime, chunk.hash,
+        JSON.stringify(chunk.tags), chunk.category, chunk.sub_category,
+        chunk.author, chunk.org, chunk.doc_stage, chunk.doc_year,
+        chunk.summary, chunk.importance, chunk.view_count || 0
+      )
+    })
+    try {
+      await db.batch(statements)
+      inserted += batch.length
+    } catch (e: any) {
+      console.error('Seed batch error:', e.message)
+    }
   }
+
+  return c.json({ message: `Seeded ${inserted} demo chunks with rich metadata` })
 })
 
+
 // =============================================
-// Demo Data
+// Demo Data - Rich Metadata
 // =============================================
 function getDemoData() {
   return [
     // === 국가중점데이터 사업 - PPT ===
     {
-      chunk_id: 'demo-ppt-001-s01',
-      file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
-      file_type: 'pptx',
-      project_path: '국가중점데이터',
-      doc_title: '최종보고서_v3.2',
-      location_type: 'slide',
-      location_value: '1',
-      location_detail: 'Slide 1',
+      chunk_id: 'demo-ppt-001-s01', file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
+      file_type: 'pptx', project_path: '국가중점데이터', doc_title: '최종보고서_v3.2',
+      location_type: 'slide', location_value: '1', location_detail: 'Slide 1',
       text: '제5차 국가중점데이터 개방 확대 및 활용 촉진 전략 수립 최종보고서. 수행기관: ○○컨설팅. 발주처: 한국지능정보사회진흥원(NIA). 2025년 12월.',
-      mtime: '2025-12-15T10:30:00',
-      hash: 'demo_hash_001_s01'
+      mtime: '2025-12-15T10:30:00', hash: 'demo_hash_001_s01',
+      tags: ['국가중점데이터', '데이터개방', 'NIA', '전략수립'], category: '데이터',
+      sub_category: '데이터 개방', author: '○○컨설팅', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '최종보고', doc_year: '2025', summary: '국가중점데이터 개방 확대 전략의 최종보고서 표지',
+      importance: 90, view_count: 45
     },
     {
-      chunk_id: 'demo-ppt-001-s05',
-      file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
-      file_type: 'pptx',
-      project_path: '국가중점데이터',
-      doc_title: '최종보고서_v3.2',
-      location_type: 'slide',
-      location_value: '5',
-      location_detail: 'Slide 5',
+      chunk_id: 'demo-ppt-001-s05', file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
+      file_type: 'pptx', project_path: '국가중점데이터', doc_title: '최종보고서_v3.2',
+      location_type: 'slide', location_value: '5', location_detail: 'Slide 5',
       text: '현황분석 프레임워크. As-Is 분석 대상: 공공데이터포털, 데이터스토어, 공공데이터 활용지원센터. 분석 관점: 데이터 거버넌스, 품질관리체계, 유통플랫폼 현황, 기관별 데이터 관리 성숙도.',
-      mtime: '2025-12-15T10:30:00',
-      hash: 'demo_hash_001_s05'
+      mtime: '2025-12-15T10:30:00', hash: 'demo_hash_001_s05',
+      tags: ['현황분석', '데이터 거버넌스', '품질관리', '공공데이터포털', '성숙도'],
+      category: '데이터', sub_category: '거버넌스', author: '○○컨설팅',
+      org: 'NIA(한국지능정보사회진흥원)', doc_stage: '최종보고', doc_year: '2025',
+      summary: 'As-Is 현황분석 프레임워크 - 데이터 거버넌스, 품질관리, 유통플랫폼 분석 구조',
+      importance: 85, view_count: 38
     },
     {
-      chunk_id: 'demo-ppt-001-s12',
-      file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
-      file_type: 'pptx',
-      project_path: '국가중점데이터',
-      doc_title: '최종보고서_v3.2',
-      location_type: 'slide',
-      location_value: '12',
-      location_detail: 'Slide 12',
+      chunk_id: 'demo-ppt-001-s12', file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
+      file_type: 'pptx', project_path: '국가중점데이터', doc_title: '최종보고서_v3.2',
+      location_type: 'slide', location_value: '12', location_detail: 'Slide 12',
       text: '기관별 데이터 인프라 현황 분석. 국토교통부: 국가공간정보포털 운영, 부동산 실거래가 데이터 개방. 보건복지부: 건강보험공단 빅데이터 연계, 의료데이터 표준화 추진. 환경부: 대기오염 실시간 데이터, 수질측정 네트워크 현황.',
-      mtime: '2025-12-15T10:30:00',
-      hash: 'demo_hash_001_s12'
+      mtime: '2025-12-15T10:30:00', hash: 'demo_hash_001_s12',
+      tags: ['인프라현황', '국토교통부', '보건복지부', '환경부', '빅데이터'],
+      category: '인프라', sub_category: '데이터 인프라', author: '○○컨설팅',
+      org: 'NIA(한국지능정보사회진흥원)', doc_stage: '최종보고', doc_year: '2025',
+      summary: '국토교통부/보건복지부/환경부의 데이터 인프라 현황 비교 분석',
+      importance: 80, view_count: 52
     },
     {
-      chunk_id: 'demo-ppt-001-s18',
-      file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
-      file_type: 'pptx',
-      project_path: '국가중점데이터',
-      doc_title: '최종보고서_v3.2',
-      location_type: 'slide',
-      location_value: '18',
-      location_detail: 'Slide 18',
+      chunk_id: 'demo-ppt-001-s18', file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
+      file_type: 'pptx', project_path: '국가중점데이터', doc_title: '최종보고서_v3.2',
+      location_type: 'slide', location_value: '18', location_detail: 'Slide 18',
       text: 'To-Be 목표모델 개념도. 통합 데이터 거버넌스 체계 구축. 단계: 1단계 데이터 표준화(2026), 2단계 플랫폼 고도화(2027), 3단계 AI 기반 자동화(2028). 핵심 KPI: 데이터 개방률 85% 달성, 활용건수 전년 대비 30% 증가.',
-      mtime: '2025-12-15T10:30:00',
-      hash: 'demo_hash_001_s18'
+      mtime: '2025-12-15T10:30:00', hash: 'demo_hash_001_s18',
+      tags: ['목표모델', '거버넌스', 'KPI', '로드맵', 'AI자동화'],
+      category: '전략', sub_category: '목표모델', author: '○○컨설팅',
+      org: 'NIA(한국지능정보사회진흥원)', doc_stage: '최종보고', doc_year: '2025',
+      summary: '3단계 To-Be 목표모델 - 표준화→고도화→AI자동화, KPI 포함',
+      importance: 95, view_count: 67
     },
     {
-      chunk_id: 'demo-ppt-001-s25',
-      file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
-      file_type: 'pptx',
-      project_path: '국가중점데이터',
-      doc_title: '최종보고서_v3.2',
-      location_type: 'slide',
-      location_value: '25',
-      location_detail: 'Slide 25',
+      chunk_id: 'demo-ppt-001-s25', file_path: '국가중점데이터/03. 제안서/최종보고서_v3.2.pptx',
+      file_type: 'pptx', project_path: '국가중점데이터', doc_title: '최종보고서_v3.2',
+      location_type: 'slide', location_value: '25', location_detail: 'Slide 25',
       text: '이행과제 추진 로드맵. 1차년도(2026): 데이터 품질관리 체계 고도화, 메타데이터 표준 적용. 2차년도(2027): 데이터 유통 플랫폼 통합, API 게이트웨이 구축. 3차년도(2028): AI 기반 데이터 자동분류, 실시간 품질 모니터링.',
-      mtime: '2025-12-15T10:30:00',
-      hash: 'demo_hash_001_s25'
+      mtime: '2025-12-15T10:30:00', hash: 'demo_hash_001_s25',
+      tags: ['이행과제', '로드맵', '품질관리', '메타데이터', 'API게이트웨이'],
+      category: '전략', sub_category: '이행계획', author: '○○컨설팅',
+      org: 'NIA(한국지능정보사회진흥원)', doc_stage: '최종보고', doc_year: '2025',
+      summary: '3개년 이행과제 로드맵 - 품질관리→플랫폼통합→AI자동분류',
+      importance: 88, view_count: 41
     },
 
     // === 국가중점데이터 - PDF ===
     {
-      chunk_id: 'demo-pdf-002-p03',
-      file_path: '국가중점데이터/01. 제안요청서/RFP_국가중점데이터_2025.pdf',
-      file_type: 'pdf',
-      project_path: '국가중점데이터',
-      doc_title: 'RFP_국가중점데이터_2025',
-      location_type: 'page',
-      location_value: '3',
-      location_detail: 'Page 3',
+      chunk_id: 'demo-pdf-002-p03', file_path: '국가중점데이터/01. 제안요청서/RFP_국가중점데이터_2025.pdf',
+      file_type: 'pdf', project_path: '국가중점데이터', doc_title: 'RFP_국가중점데이터_2025',
+      location_type: 'page', location_value: '3', location_detail: 'Page 3',
       text: '사업 개요. 사업명: 제5차 국가중점데이터 개방 확대 및 활용 촉진. 사업기간: 2025.06 ~ 2025.12 (7개월). 사업예산: 5억원(부가세 포함). 발주기관: 한국지능정보사회진흥원(NIA). 수행범위: 현황분석, 중점데이터 선정, 개방전략 수립, 이행계획.',
-      mtime: '2025-05-20T09:00:00',
-      hash: 'demo_hash_002_p03'
+      mtime: '2025-05-20T09:00:00', hash: 'demo_hash_002_p03',
+      tags: ['RFP', '사업개요', '예산', 'NIA'], category: '사업관리',
+      sub_category: '제안요청', author: 'NIA', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: 'RFP', doc_year: '2025',
+      summary: '국가중점데이터 사업 RFP - 7개월/5억원, 현황분석~이행계획',
+      importance: 75, view_count: 33
     },
     {
-      chunk_id: 'demo-pdf-002-p15',
-      file_path: '국가중점데이터/01. 제안요청서/RFP_국가중점데이터_2025.pdf',
-      file_type: 'pdf',
-      project_path: '국가중점데이터',
-      doc_title: 'RFP_국가중점데이터_2025',
-      location_type: 'page',
-      location_value: '15',
-      location_detail: 'Page 15',
+      chunk_id: 'demo-pdf-002-p15', file_path: '국가중점데이터/01. 제안요청서/RFP_국가중점데이터_2025.pdf',
+      file_type: 'pdf', project_path: '국가중점데이터', doc_title: 'RFP_국가중점데이터_2025',
+      location_type: 'page', location_value: '15', location_detail: 'Page 15',
       text: '평가기준. 기술평가(80점): 사업이해도(15), 수행방법론(25), 기술역량(20), 프로젝트관리(10), 유사수행실적(10). 가격평가(20점). 총 100점 만점. 협상적격자: 기술평가 75점 이상.',
-      mtime: '2025-05-20T09:00:00',
-      hash: 'demo_hash_002_p15'
+      mtime: '2025-05-20T09:00:00', hash: 'demo_hash_002_p15',
+      tags: ['평가기준', '기술평가', '배점', '방법론'], category: '사업관리',
+      sub_category: '평가', author: 'NIA', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: 'RFP', doc_year: '2025',
+      summary: '입찰평가 배점표 - 기술80점+가격20점, 협상적격 75점이상',
+      importance: 70, view_count: 28
     },
 
-    // === 국가중점데이터 - XLSX (기관목록) ===
+    // === 국가중점데이터 - XLSX ===
     {
-      chunk_id: 'demo-xlsx-003-s1-r5',
-      file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
-      file_type: 'xlsx',
-      project_path: '국가중점데이터',
-      doc_title: '기관별_데이터현황',
-      location_type: 'sheet',
-      location_value: '기관목록',
-      location_detail: 'Sheet:기관목록 Row:5',
+      chunk_id: 'demo-xlsx-003-s1-r5', file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
+      file_type: 'xlsx', project_path: '국가중점데이터', doc_title: '기관별_데이터현황',
+      location_type: 'sheet', location_value: '기관목록', location_detail: 'Sheet:기관목록 Row:5',
       text: '국토교통부 | 국가공간정보포털 | 부동산 실거래가 | 개방완료 | 월1회 갱신 | API+파일 | 연간 2,500만건 활용',
-      mtime: '2025-09-10T14:20:00',
-      hash: 'demo_hash_003_s1_r5'
+      mtime: '2025-09-10T14:20:00', hash: 'demo_hash_003_s1_r5',
+      tags: ['국토교통부', '공간정보', '부동산', 'API'], category: '데이터',
+      sub_category: '기관 데이터', author: '○○컨설팅', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '국토교통부 데이터 현황 - 공간정보포털, 실거래가 개방',
+      importance: 65, view_count: 22
     },
     {
-      chunk_id: 'demo-xlsx-003-s1-r6',
-      file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
-      file_type: 'xlsx',
-      project_path: '국가중점데이터',
-      doc_title: '기관별_데이터현황',
-      location_type: 'sheet',
-      location_value: '기관목록',
-      location_detail: 'Sheet:기관목록 Row:6',
+      chunk_id: 'demo-xlsx-003-s1-r6', file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
+      file_type: 'xlsx', project_path: '국가중점데이터', doc_title: '기관별_데이터현황',
+      location_type: 'sheet', location_value: '기관목록', location_detail: 'Sheet:기관목록 Row:6',
       text: '보건복지부 | 건강보험공단 | 진료비 청구자료 | 부분개방 | 분기갱신 | 분석용파일 | 비식별처리 필요',
-      mtime: '2025-09-10T14:20:00',
-      hash: 'demo_hash_003_s1_r6'
+      mtime: '2025-09-10T14:20:00', hash: 'demo_hash_003_s1_r6',
+      tags: ['보건복지부', '건강보험', '비식별', '의료데이터'], category: '데이터',
+      sub_category: '기관 데이터', author: '○○컨설팅', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '보건복지부 데이터 현황 - 진료비 자료, 비식별처리 필요',
+      importance: 65, view_count: 30
     },
     {
-      chunk_id: 'demo-xlsx-003-s1-r7',
-      file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
-      file_type: 'xlsx',
-      project_path: '국가중점데이터',
-      doc_title: '기관별_데이터현황',
-      location_type: 'sheet',
-      location_value: '기관목록',
-      location_detail: 'Sheet:기관목록 Row:7',
+      chunk_id: 'demo-xlsx-003-s1-r7', file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
+      file_type: 'xlsx', project_path: '국가중점데이터', doc_title: '기관별_데이터현황',
+      location_type: 'sheet', location_value: '기관목록', location_detail: 'Sheet:기관목록 Row:7',
       text: '환경부 | 대기오염측정망 | 실시간 대기질 | 개방완료 | 실시간 | API | 연간 8,000만건 활용',
-      mtime: '2025-09-10T14:20:00',
-      hash: 'demo_hash_003_s1_r7'
+      mtime: '2025-09-10T14:20:00', hash: 'demo_hash_003_s1_r7',
+      tags: ['환경부', '대기오염', '실시간', 'API'], category: '데이터',
+      sub_category: '기관 데이터', author: '○○컨설팅', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '환경부 실시간 대기질 데이터 - API 개방완료, 8천만건',
+      importance: 60, view_count: 18
     },
     {
-      chunk_id: 'demo-xlsx-003-s2-r3',
-      file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
-      file_type: 'xlsx',
-      project_path: '국가중점데이터',
-      doc_title: '기관별_데이터현황',
-      location_type: 'sheet',
-      location_value: '인프라현황',
-      location_detail: 'Sheet:인프라현황 Row:3',
+      chunk_id: 'demo-xlsx-003-s2-r3', file_path: '국가중점데이터/05. 조사자료/기관별_데이터현황.xlsx',
+      file_type: 'xlsx', project_path: '국가중점데이터', doc_title: '기관별_데이터현황',
+      location_type: 'sheet', location_value: '인프라현황', location_detail: 'Sheet:인프라현황 Row:3',
       text: '공공데이터포털 | 서버 24대 | 스토리지 500TB | CDN 적용 | 일평균 트래픽 2.3TB | AWS 클라우드 하이브리드',
-      mtime: '2025-09-10T14:20:00',
-      hash: 'demo_hash_003_s2_r3'
+      mtime: '2025-09-10T14:20:00', hash: 'demo_hash_003_s2_r3',
+      tags: ['인프라', '서버', '클라우드', 'AWS', 'CDN'], category: '인프라',
+      sub_category: '서버/스토리지', author: '○○컨설팅', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '공공데이터포털 인프라 현황 - 서버24대, 500TB, AWS 하이브리드',
+      importance: 60, view_count: 15
     },
 
-    // === 공공데이터 활용 실태조사 사업 - PPT ===
+    // === 공공데이터 활용 실태조사 - PPT ===
     {
-      chunk_id: 'demo-ppt-004-s03',
-      file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
-      file_type: 'pptx',
-      project_path: '공공데이터활용실태조사',
-      doc_title: '실태조사_최종보고',
-      location_type: 'slide',
-      location_value: '3',
-      location_detail: 'Slide 3',
+      chunk_id: 'demo-ppt-004-s03', file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
+      file_type: 'pptx', project_path: '공공데이터활용실태조사', doc_title: '실태조사_최종보고',
+      location_type: 'slide', location_value: '3', location_detail: 'Slide 3',
       text: '조사 개요. 조사목적: 공공데이터 개방 및 활용 수준 진단. 조사기간: 2025.04 ~ 2025.09. 조사대상: 중앙행정기관 43개, 지자체 243개, 공공기관 350개. 조사방법: 온라인 설문 + 현장실사.',
-      mtime: '2025-10-01T16:00:00',
-      hash: 'demo_hash_004_s03'
+      mtime: '2025-10-01T16:00:00', hash: 'demo_hash_004_s03',
+      tags: ['실태조사', '조사개요', '공공데이터', '설문'], category: '데이터',
+      sub_category: '실태조사', author: '△△연구원', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '최종보고', doc_year: '2025',
+      summary: '공공데이터 활용 실태조사 개요 - 636개 기관 대상, 설문+현장실사',
+      importance: 82, view_count: 35
     },
     {
-      chunk_id: 'demo-ppt-004-s08',
-      file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
-      file_type: 'pptx',
-      project_path: '공공데이터활용실태조사',
-      doc_title: '실태조사_최종보고',
-      location_type: 'slide',
-      location_value: '8',
-      location_detail: 'Slide 8',
+      chunk_id: 'demo-ppt-004-s08', file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
+      file_type: 'pptx', project_path: '공공데이터활용실태조사', doc_title: '실태조사_최종보고',
+      location_type: 'slide', location_value: '8', location_detail: 'Slide 8',
       text: '데이터 거버넌스 성숙도 분석. 전담조직 보유율: 중앙부처 78%, 지자체 32%, 공공기관 45%. CDO 임명률: 중앙부처 65%, 지자체 12%. 데이터 품질관리 정책 수립률: 55%.',
-      mtime: '2025-10-01T16:00:00',
-      hash: 'demo_hash_004_s08'
+      mtime: '2025-10-01T16:00:00', hash: 'demo_hash_004_s08',
+      tags: ['거버넌스', '성숙도', 'CDO', '품질관리', '전담조직'], category: '거버넌스',
+      sub_category: '성숙도 분석', author: '△△연구원', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '최종보고', doc_year: '2025',
+      summary: '데이터 거버넌스 성숙도 - CDO 임명률 지자체 12%로 저조',
+      importance: 87, view_count: 48
     },
     {
-      chunk_id: 'demo-ppt-004-s15',
-      file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
-      file_type: 'pptx',
-      project_path: '공공데이터활용실태조사',
-      doc_title: '실태조사_최종보고',
-      location_type: 'slide',
-      location_value: '15',
-      location_detail: 'Slide 15',
+      chunk_id: 'demo-ppt-004-s15', file_path: '공공데이터활용실태조사/03. 보고서/실태조사_최종보고.pptx',
+      file_type: 'pptx', project_path: '공공데이터활용실태조사', doc_title: '실태조사_최종보고',
+      location_type: 'slide', location_value: '15', location_detail: 'Slide 15',
       text: '보건복지부 사례분석. 건강보험 빅데이터 분석시스템 운영현황. 연간 분석과제 120건, 데이터 결합 45건. 비식별처리 프로세스 표준화 완료. 의료 AI 학습데이터 개방 확대 추진 중.',
-      mtime: '2025-10-01T16:00:00',
-      hash: 'demo_hash_004_s15'
+      mtime: '2025-10-01T16:00:00', hash: 'demo_hash_004_s15',
+      tags: ['보건복지부', '빅데이터', '비식별', '의료AI', '사례분석'], category: 'AI',
+      sub_category: '의료 AI', author: '△△연구원', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '최종보고', doc_year: '2025',
+      summary: '보건복지부 빅데이터 분석시스템 사례 - 연120건 분석, 의료AI 추진',
+      importance: 78, view_count: 42
     },
 
     // === 공공데이터 활용 실태조사 - CSV ===
     {
-      chunk_id: 'demo-csv-005-r10',
-      file_path: '공공데이터활용실태조사/05. 데이터/기관별_성숙도점수.csv',
-      file_type: 'csv',
-      project_path: '공공데이터활용실태조사',
-      doc_title: '기관별_성숙도점수',
-      location_type: 'row',
-      location_value: '10',
-      location_detail: 'Row 10',
+      chunk_id: 'demo-csv-005-r10', file_path: '공공데이터활용실태조사/05. 데이터/기관별_성숙도점수.csv',
+      file_type: 'csv', project_path: '공공데이터활용실태조사', doc_title: '기관별_성숙도점수',
+      location_type: 'row', location_value: '10', location_detail: 'Row 10',
       text: '보건복지부,중앙부처,78.5,82.0,75.3,거버넌스우수,데이터결합활성화',
-      mtime: '2025-08-15T11:00:00',
-      hash: 'demo_hash_005_r10'
+      mtime: '2025-08-15T11:00:00', hash: 'demo_hash_005_r10',
+      tags: ['보건복지부', '성숙도', '거버넌스', '점수'], category: '거버넌스',
+      sub_category: '성숙도 평가', author: '△△연구원', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '보건복지부 데이터 성숙도 점수 - 총점 78.5, 거버넌스 우수',
+      importance: 55, view_count: 20
     },
     {
-      chunk_id: 'demo-csv-005-r11',
-      file_path: '공공데이터활용실태조사/05. 데이터/기관별_성숙도점수.csv',
-      file_type: 'csv',
-      project_path: '공공데이터활용실태조사',
-      doc_title: '기관별_성숙도점수',
-      location_type: 'row',
-      location_value: '11',
-      location_detail: 'Row 11',
+      chunk_id: 'demo-csv-005-r11', file_path: '공공데이터활용실태조사/05. 데이터/기관별_성숙도점수.csv',
+      file_type: 'csv', project_path: '공공데이터활용실태조사', doc_title: '기관별_성숙도점수',
+      location_type: 'row', location_value: '11', location_detail: 'Row 11',
       text: '국토교통부,중앙부처,82.1,88.5,79.8,플랫폼우수,공간정보특화',
-      mtime: '2025-08-15T11:00:00',
-      hash: 'demo_hash_005_r11'
+      mtime: '2025-08-15T11:00:00', hash: 'demo_hash_005_r11',
+      tags: ['국토교통부', '성숙도', '플랫폼', '공간정보'], category: '거버넌스',
+      sub_category: '성숙도 평가', author: '△△연구원', org: 'NIA(한국지능정보사회진흥원)',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '국토교통부 데이터 성숙도 - 총점 82.1, 플랫폼 우수',
+      importance: 55, view_count: 19
     },
 
     // === AI 중장기전략 사업 - PPT ===
     {
-      chunk_id: 'demo-ppt-006-s02',
-      file_path: 'AI중장기전략/03. 제안서/AI전략_제안서_최종.pptx',
-      file_type: 'pptx',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI전략_제안서_최종',
-      location_type: 'slide',
-      location_value: '2',
-      location_detail: 'Slide 2',
+      chunk_id: 'demo-ppt-006-s02', file_path: 'AI중장기전략/03. 제안서/AI전략_제안서_최종.pptx',
+      file_type: 'pptx', project_path: 'AI중장기전략', doc_title: 'AI전략_제안서_최종',
+      location_type: 'slide', location_value: '2', location_detail: 'Slide 2',
       text: 'AI 중장기 발전 전략 수립 프로젝트 개요. 발주처: 과학기술정보통신부. 사업기간: 2025.03 ~ 2025.10. 목표: 국가 AI 경쟁력 강화를 위한 3개년 로드맵 수립. 주요과업: AI 생태계 분석, 핵심기술 선정, 인력양성 전략, 산업 활용 방안.',
-      mtime: '2025-03-20T13:00:00',
-      hash: 'demo_hash_006_s02'
+      mtime: '2025-03-20T13:00:00', hash: 'demo_hash_006_s02',
+      tags: ['AI전략', '과기정통부', '로드맵', '인력양성'], category: 'AI',
+      sub_category: 'AI 전략', author: '□□컨설팅', org: '과학기술정보통신부',
+      doc_stage: '제안서', doc_year: '2025',
+      summary: 'AI 중장기 전략 프로젝트 개요 - 과기정통부 발주, 3개년 로드맵',
+      importance: 88, view_count: 56
     },
     {
-      chunk_id: 'demo-ppt-006-s10',
-      file_path: 'AI중장기전략/03. 제안서/AI전략_제안서_최종.pptx',
-      file_type: 'pptx',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI전략_제안서_최종',
-      location_type: 'slide',
-      location_value: '10',
-      location_detail: 'Slide 10',
+      chunk_id: 'demo-ppt-006-s10', file_path: 'AI중장기전략/03. 제안서/AI전략_제안서_최종.pptx',
+      file_type: 'pptx', project_path: 'AI중장기전략', doc_title: 'AI전략_제안서_최종',
+      location_type: 'slide', location_value: '10', location_detail: 'Slide 10',
       text: 'AI 핵심기술 분석. 생성형 AI: LLM, 멀티모달, RAG 기술 급성장. 엣지 AI: 온디바이스 추론 확대. 강화학습: 로봇, 자율주행 적용. 설명가능 AI(XAI): 공공/의료 분야 필수. 연합학습: 의료데이터 프라이버시 보호.',
-      mtime: '2025-03-20T13:00:00',
-      hash: 'demo_hash_006_s10'
+      mtime: '2025-03-20T13:00:00', hash: 'demo_hash_006_s10',
+      tags: ['생성형AI', 'LLM', 'RAG', '멀티모달', 'XAI', '연합학습'], category: 'AI',
+      sub_category: 'AI 기술', author: '□□컨설팅', org: '과학기술정보통신부',
+      doc_stage: '제안서', doc_year: '2025',
+      summary: 'AI 핵심기술 5대 영역 - 생성형AI, 엣지AI, 강화학습, XAI, 연합학습',
+      importance: 92, view_count: 71
     },
     {
-      chunk_id: 'demo-ppt-006-s22',
-      file_path: 'AI중장기전략/04. 산출물/AI_현황분석_보고서.pptx',
-      file_type: 'pptx',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI_현황분석_보고서',
-      location_type: 'slide',
-      location_value: '22',
-      location_detail: 'Slide 22',
+      chunk_id: 'demo-ppt-006-s22', file_path: 'AI중장기전략/04. 산출물/AI_현황분석_보고서.pptx',
+      file_type: 'pptx', project_path: 'AI중장기전략', doc_title: 'AI_현황분석_보고서',
+      location_type: 'slide', location_value: '22', location_detail: 'Slide 22',
       text: '공공부문 AI 도입 현황. 도입률: 중앙부처 45%, 지자체 18%. 주요 활용 분야: 민원 챗봇(32%), 문서분류(28%), 이상탐지(15%). 장애요인: 데이터 부족(42%), 예산(35%), 인력(23%). 보건복지부: AI 기반 복지사각지대 발굴 시스템 운영.',
-      mtime: '2025-07-15T10:00:00',
-      hash: 'demo_hash_006_s22'
+      mtime: '2025-07-15T10:00:00', hash: 'demo_hash_006_s22',
+      tags: ['AI도입', '챗봇', '문서분류', '이상탐지', '장애요인'], category: 'AI',
+      sub_category: 'AI 도입', author: '□□컨설팅', org: '과학기술정보통신부',
+      doc_stage: '산출물', doc_year: '2025',
+      summary: '공공부문 AI 도입 현황 - 부처45%/지자체18%, 챗봇·문서분류 중심',
+      importance: 85, view_count: 63
     },
 
     // === AI 중장기전략 - PDF ===
     {
-      chunk_id: 'demo-pdf-007-p08',
-      file_path: 'AI중장기전략/01. RFP/AI전략수립_제안요청서.pdf',
-      file_type: 'pdf',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI전략수립_제안요청서',
-      location_type: 'page',
-      location_value: '8',
-      location_detail: 'Page 8',
+      chunk_id: 'demo-pdf-007-p08', file_path: 'AI중장기전략/01. RFP/AI전략수립_제안요청서.pdf',
+      file_type: 'pdf', project_path: 'AI중장기전략', doc_title: 'AI전략수립_제안요청서',
+      location_type: 'page', location_value: '8', location_detail: 'Page 8',
       text: '수행 요구사항. 국내외 AI 정책 동향 분석. 산업별 AI 도입 현황 조사. AI 핵심기술 트렌드 분석(생성형AI, 멀티모달, 에이전트 AI 포함). 공공분야 AI 적용 전략. 3개년 실행 로드맵 및 소요예산.',
-      mtime: '2025-02-10T09:00:00',
-      hash: 'demo_hash_007_p08'
+      mtime: '2025-02-10T09:00:00', hash: 'demo_hash_007_p08',
+      tags: ['RFP', '요구사항', 'AI정책', '에이전트AI'], category: '사업관리',
+      sub_category: '제안요청', author: '과학기술정보통신부', org: '과학기술정보통신부',
+      doc_stage: 'RFP', doc_year: '2025',
+      summary: 'AI 전략 RFP 수행요구사항 - 정책분석, 기술트렌드, 로드맵',
+      importance: 72, view_count: 25
     },
 
     // === AI 중장기전략 - ipynb ===
     {
-      chunk_id: 'demo-ipynb-008-c3',
-      file_path: 'AI중장기전략/06. 분석코드/AI_adoption_analysis.ipynb',
-      file_type: 'ipynb',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI_adoption_analysis',
-      location_type: 'cell',
-      location_value: '3',
-      location_detail: 'Cell 3 (markdown)',
+      chunk_id: 'demo-ipynb-008-c3', file_path: 'AI중장기전략/06. 분석코드/AI_adoption_analysis.ipynb',
+      file_type: 'ipynb', project_path: 'AI중장기전략', doc_title: 'AI_adoption_analysis',
+      location_type: 'cell', location_value: '3', location_detail: 'Cell 3 (markdown)',
       text: '## 공공기관 AI 도입률 분석\n\n중앙부처, 지자체, 공공기관별 AI 도입률을 비교 분석한다.\n데이터 출처: 2025 공공부문 AI 활용 실태조사(NIA)',
-      mtime: '2025-08-20T15:30:00',
-      hash: 'demo_hash_008_c3'
+      mtime: '2025-08-20T15:30:00', hash: 'demo_hash_008_c3',
+      tags: ['AI도입률', '분석', 'NIA', '실태조사'], category: 'AI',
+      sub_category: 'AI 분석', author: '□□컨설팅', org: '과학기술정보통신부',
+      doc_stage: '분석코드', doc_year: '2025',
+      summary: 'AI 도입률 비교분석 노트북 - 기관유형별 도입률 분석',
+      importance: 58, view_count: 14
     },
     {
-      chunk_id: 'demo-ipynb-008-c5',
-      file_path: 'AI중장기전략/06. 분석코드/AI_adoption_analysis.ipynb',
-      file_type: 'ipynb',
-      project_path: 'AI중장기전략',
-      doc_title: 'AI_adoption_analysis',
-      location_type: 'cell',
-      location_value: '5',
-      location_detail: 'Cell 5 (code)',
+      chunk_id: 'demo-ipynb-008-c5', file_path: 'AI중장기전략/06. 분석코드/AI_adoption_analysis.ipynb',
+      file_type: 'ipynb', project_path: 'AI중장기전략', doc_title: 'AI_adoption_analysis',
+      location_type: 'cell', location_value: '5', location_detail: 'Cell 5 (code)',
       text: "import pandas as pd\nimport matplotlib.pyplot as plt\n\ndf = pd.read_csv('ai_adoption_survey.csv')\n\n# 기관유형별 AI 도입률\nadoption_by_type = df.groupby('기관유형')['AI도입여부'].mean()\nprint(adoption_by_type)\n\n# 보건복지부 상세 분석\nmohw = df[df['기관명'] == '보건복지부']\nprint(mohw[['시스템명', 'AI적용분야', '도입시기', '예산규모']])",
-      mtime: '2025-08-20T15:30:00',
-      hash: 'demo_hash_008_c5'
+      mtime: '2025-08-20T15:30:00', hash: 'demo_hash_008_c5',
+      tags: ['python', 'pandas', 'matplotlib', 'AI도입'], category: 'AI',
+      sub_category: 'AI 분석', author: '□□컨설팅', org: '과학기술정보통신부',
+      doc_stage: '분석코드', doc_year: '2025',
+      summary: 'AI 도입률 분석 코드 - pandas 기관유형별 도입률, 보건복지부 상세',
+      importance: 50, view_count: 12
     },
 
-    // === 디지털플랫폼정부 사업 - PPT ===
+    // === 디지털플랫폼정부 - PPT ===
     {
-      chunk_id: 'demo-ppt-009-s04',
-      file_path: '디지털플랫폼정부/03. 보고서/DPG_ISP_최종보고.pptx',
-      file_type: 'pptx',
-      project_path: '디지털플랫폼정부',
-      doc_title: 'DPG_ISP_최종보고',
-      location_type: 'slide',
-      location_value: '4',
-      location_detail: 'Slide 4',
+      chunk_id: 'demo-ppt-009-s04', file_path: '디지털플랫폼정부/03. 보고서/DPG_ISP_최종보고.pptx',
+      file_type: 'pptx', project_path: '디지털플랫폼정부', doc_title: 'DPG_ISP_최종보고',
+      location_type: 'slide', location_value: '4', location_detail: 'Slide 4',
       text: '디지털플랫폼정부 ISP 추진 배경. 정부 디지털 전환 가속화. 부처간 데이터 사일로 해소 필요. 국민 맞춤형 서비스 통합 제공. 클라우드 네이티브 전환 추진.',
-      mtime: '2025-11-01T09:00:00',
-      hash: 'demo_hash_009_s04'
+      mtime: '2025-11-01T09:00:00', hash: 'demo_hash_009_s04',
+      tags: ['디지털전환', 'ISP', '클라우드', '데이터사일로'], category: '전략',
+      sub_category: 'ISP', author: '◇◇컨설팅', org: '행정안전부',
+      doc_stage: '최종보고', doc_year: '2025',
+      summary: '디지털플랫폼정부 ISP 배경 - 데이터사일로 해소, 클라우드 전환',
+      importance: 83, view_count: 37
     },
     {
-      chunk_id: 'demo-ppt-009-s14',
-      file_path: '디지털플랫폼정부/03. 보고서/DPG_ISP_최종보고.pptx',
-      file_type: 'pptx',
-      project_path: '디지털플랫폼정부',
-      doc_title: 'DPG_ISP_최종보고',
-      location_type: 'slide',
-      location_value: '14',
-      location_detail: 'Slide 14',
+      chunk_id: 'demo-ppt-009-s14', file_path: '디지털플랫폼정부/03. 보고서/DPG_ISP_최종보고.pptx',
+      file_type: 'pptx', project_path: '디지털플랫폼정부', doc_title: 'DPG_ISP_최종보고',
+      location_type: 'slide', location_value: '14', location_detail: 'Slide 14',
       text: '응용시스템 현황분석. 전자정부 시스템 총 1,247개. 노후 시스템(5년 이상): 43%. 클라우드 전환율: 28%. API 표준 적용률: 35%. 보건복지부 사회보장정보시스템: 연계 기관 17개, 일 처리건수 350만건.',
-      mtime: '2025-11-01T09:00:00',
-      hash: 'demo_hash_009_s14'
+      mtime: '2025-11-01T09:00:00', hash: 'demo_hash_009_s14',
+      tags: ['현황분석', '전자정부', '노후시스템', '클라우드', '사회보장정보시스템'],
+      category: '인프라', sub_category: '시스템 현황', author: '◇◇컨설팅', org: '행정안전부',
+      doc_stage: '최종보고', doc_year: '2025',
+      summary: '전자정부 시스템 현황 - 1,247개 중 43% 노후, 클라우드전환 28%',
+      importance: 80, view_count: 40
     },
 
     // === 디지털플랫폼정부 - XLSX ===
     {
-      chunk_id: 'demo-xlsx-010-s1-r4',
-      file_path: '디지털플랫폼정부/05. 조사자료/시스템_현황조사.xlsx',
-      file_type: 'xlsx',
-      project_path: '디지털플랫폼정부',
-      doc_title: '시스템_현황조사',
-      location_type: 'sheet',
-      location_value: '시스템목록',
-      location_detail: 'Sheet:시스템목록 Row:4',
+      chunk_id: 'demo-xlsx-010-s1-r4', file_path: '디지털플랫폼정부/05. 조사자료/시스템_현황조사.xlsx',
+      file_type: 'xlsx', project_path: '디지털플랫폼정부', doc_title: '시스템_현황조사',
+      location_type: 'sheet', location_value: '시스템목록', location_detail: 'Sheet:시스템목록 Row:4',
       text: '사회보장정보시스템 | 보건복지부 | 2010 | 온프레미스 | Oracle | 연계기관17개 | 일처리350만건 | 클라우드전환검토중',
-      mtime: '2025-10-15T11:30:00',
-      hash: 'demo_hash_010_s1_r4'
+      mtime: '2025-10-15T11:30:00', hash: 'demo_hash_010_s1_r4',
+      tags: ['사회보장', '보건복지부', 'Oracle', '온프레미스'], category: '인프라',
+      sub_category: '시스템 목록', author: '◇◇컨설팅', org: '행정안전부',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '사회보장정보시스템 현황 - 보건복지부, 2010년 구축, 클라우드 전환검토',
+      importance: 62, view_count: 25
     },
     {
-      chunk_id: 'demo-xlsx-010-s1-r8',
-      file_path: '디지털플랫폼정부/05. 조사자료/시스템_현황조사.xlsx',
-      file_type: 'xlsx',
-      project_path: '디지털플랫폼정부',
-      doc_title: '시스템_현황조사',
-      location_type: 'sheet',
-      location_value: '시스템목록',
-      location_detail: 'Sheet:시스템목록 Row:8',
+      chunk_id: 'demo-xlsx-010-s1-r8', file_path: '디지털플랫폼정부/05. 조사자료/시스템_현황조사.xlsx',
+      file_type: 'xlsx', project_path: '디지털플랫폼정부', doc_title: '시스템_현황조사',
+      location_type: 'sheet', location_value: '시스템목록', location_detail: 'Sheet:시스템목록 Row:8',
       text: '국가공간정보통합체계 | 국토교통부 | 2015 | 하이브리드 | PostgreSQL | 연계기관8개 | GIS데이터 | 고도화필요',
-      mtime: '2025-10-15T11:30:00',
-      hash: 'demo_hash_010_s1_r8'
+      mtime: '2025-10-15T11:30:00', hash: 'demo_hash_010_s1_r8',
+      tags: ['GIS', '국토교통부', 'PostgreSQL', '하이브리드'], category: '인프라',
+      sub_category: '시스템 목록', author: '◇◇컨설팅', org: '행정안전부',
+      doc_stage: '조사자료', doc_year: '2025',
+      summary: '국가공간정보통합체계 - 국토교통부, 하이브리드 구성, 고도화 필요',
+      importance: 58, view_count: 17
     },
 
     // === EA 수립 사업 - PDF ===
     {
-      chunk_id: 'demo-pdf-011-p22',
-      file_path: '공공기관EA수립/02. 산출물/EA_현황분석보고서.pdf',
-      file_type: 'pdf',
-      project_path: '공공기관EA수립',
-      doc_title: 'EA_현황분석보고서',
-      location_type: 'page',
-      location_value: '22',
-      location_detail: 'Page 22',
+      chunk_id: 'demo-pdf-011-p22', file_path: '공공기관EA수립/02. 산출물/EA_현황분석보고서.pdf',
+      file_type: 'pdf', project_path: '공공기관EA수립', doc_title: 'EA_현황분석보고서',
+      location_type: 'page', location_value: '22', location_detail: 'Page 22',
       text: '데이터 아키텍처 현황. 마스터데이터 관리체계: 미흡. 데이터 표준 적용률: 42%. 메타데이터 관리: 수동. 데이터 카탈로그: 미구축. 데이터 품질관리 도구: 미도입. 개선방향: 데이터 거버넌스 체계 수립, 표준 메타데이터 관리, 마스터데이터 통합.',
-      mtime: '2025-04-10T10:00:00',
-      hash: 'demo_hash_011_p22'
+      mtime: '2025-04-10T10:00:00', hash: 'demo_hash_011_p22',
+      tags: ['EA', '데이터아키텍처', '메타데이터', '마스터데이터', '품질관리'],
+      category: '거버넌스', sub_category: 'EA', author: '☆☆컨설팅', org: '한국정보화진흥원',
+      doc_stage: '산출물', doc_year: '2025',
+      summary: 'EA 데이터 아키텍처 현황 - 표준적용률 42%, 메타데이터 수동관리',
+      importance: 73, view_count: 29
     },
     {
-      chunk_id: 'demo-pdf-011-p35',
-      file_path: '공공기관EA수립/02. 산출물/EA_현황분석보고서.pdf',
-      file_type: 'pdf',
-      project_path: '공공기관EA수립',
-      doc_title: 'EA_현황분석보고서',
-      location_type: 'page',
-      location_value: '35',
-      location_detail: 'Page 35',
+      chunk_id: 'demo-pdf-011-p35', file_path: '공공기관EA수립/02. 산출물/EA_현황분석보고서.pdf',
+      file_type: 'pdf', project_path: '공공기관EA수립', doc_title: 'EA_현황분석보고서',
+      location_type: 'page', location_value: '35', location_detail: 'Page 35',
       text: '인프라 아키텍처 현황. 서버 총 128대(물리 45, 가상 83). 노후서버(5년 이상): 38%. 평균 CPU 사용률: 32%. 스토리지 총 용량: 850TB, 사용률 67%. 네트워크: 10G 백본. 보안장비: 방화벽 4대, IPS 2대, WAF 1대.',
-      mtime: '2025-04-10T10:00:00',
-      hash: 'demo_hash_011_p35'
+      mtime: '2025-04-10T10:00:00', hash: 'demo_hash_011_p35',
+      tags: ['인프라', '서버', '보안', '방화벽', 'IPS'], category: '인프라',
+      sub_category: '인프라 아키텍처', author: '☆☆컨설팅', org: '한국정보화진흥원',
+      doc_stage: '산출물', doc_year: '2025',
+      summary: 'EA 인프라 현황 - 서버128대(38%노후), 스토리지 850TB',
+      importance: 68, view_count: 21
     },
   ]
 }
