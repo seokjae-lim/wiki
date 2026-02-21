@@ -1,16 +1,17 @@
-# Knowledge Wiki - KM-AI 3.0
+# Knowledge Wiki - KM-AI 4.0
 
 ## Project Overview
 - **Name**: Knowledge Wiki (KM-AI)
-- **Version**: 3.0 (Semantic Search + AI Q&A + RAG)
+- **Version**: 4.0 (Auth System + Semantic Search + AI Q&A + RAG)
 - **Goal**: Google Drive 컨설팅 산출물(PPT, PDF, Excel, CSV, ipynb, DOCX)의 내부 텍스트를 슬라이드/페이지/행/셀 단위로 전문+시맨틱 검색하고, AI Q&A로 자연어 질의응답이 가능한 지식 플랫폼
 - **Tech Stack**: Hono + TypeScript + Cloudflare Workers (D1 SQLite FTS5) + TF-IDF 벡터 임베딩 + Tailwind CSS + Python Indexer
 
 ## URLs
 - **Sandbox**: https://3000-ix7c266jwx6te70xnjbgs-c07dda5e.sandbox.novita.ai
+- **GitHub**: https://github.com/seokjae-lim/wiki
 - **Production**: (Cloudflare Pages 배포 대기)
 
-## Completed Features (v3.0)
+## Completed Features
 
 ### Phase 1 (MVP): Full-Text Search
 - FTS5 전문 검색, 슬라이드/페이지/시트/행/셀 위치 정보
@@ -21,18 +22,32 @@
 - 4개 뷰 SPA: 홈, 검색, 브라우징, 대시보드
 - 중요도 점수, 조회수, 태그 클라우드, 인기 문서
 
-### Phase 3 (NEW): Semantic Search + AI Q&A
-- **TF-IDF 벡터 임베딩**: 300차원 한국어+영문 도메인 어휘 기반
-- **시맨틱 검색**: 코사인 유사도 기반 의미 검색 (FTS/시맨틱 토글)
-- **벡터 유사문서 추천**: 문서 상세에서 벡터 기반 유사도 표시
-- **AI Q&A (RAG 패턴)**: FTS+시맨틱 하이브리드 검색 → 컨텍스트 기반 답변
-  - OpenAI API 키 있으면: GPT-4o-mini 자연어 답변
-  - 키 없으면: 관련 문서 컨텍스트 요약 (fallback)
-- **임베딩 관리**: 서버측 자동 생성, 커버리지 통계
+### Phase 3: Semantic Search + AI Q&A
+- TF-IDF 벡터 임베딩 (300차원 한국어+영문 도메인 어휘)
+- 시맨틱 검색: 코사인 유사도 기반 (FTS/시맨틱 토글)
+- AI Q&A (RAG 패턴): FTS+시맨틱 하이브리드 → 컨텍스트 답변
+- 벡터 유사문서 추천
 
-### Backend API
+### Phase 4 (NEW): Authentication System
+- **4종 로그인**: 카카오, 네이버, Google, 이메일
+- OAuth 2.0 Authorization Code Flow (카카오/네이버/구글)
+- 이메일 회원가입/로그인 (SHA-256 비밀번호 해싱)
+- 쿠키 기반 세션 관리 (30일 만료, httpOnly, secure)
+- CSRF 방지: OAuth state 토큰
+- 헤더 사용자 메뉴 (프로필, 로그아웃)
+
+## Backend API
+
 | Endpoint | Method | Description |
 |---|---|---|
+| `/api/auth/me` | GET | 현재 로그인 사용자 조회 |
+| `/api/auth/register` | POST | 이메일 회원가입 |
+| `/api/auth/login` | POST | 이메일 로그인 |
+| `/api/auth/logout` | POST | 로그아웃 |
+| `/api/auth/providers` | GET | 사용 가능한 OAuth 프로바이더 |
+| `/api/auth/kakao` | GET | 카카오 OAuth 시작 |
+| `/api/auth/naver` | GET | 네이버 OAuth 시작 |
+| `/api/auth/google` | GET | Google OAuth 시작 |
 | `/api/search` | GET | FTS 전문 검색 |
 | `/api/semantic-search` | GET | 시맨틱 벡터 검색 |
 | `/api/similar/:id` | GET | 벡터 유사 문서 추천 |
@@ -51,19 +66,6 @@
 | `/api/chunks` | DELETE | 전체 삭제 |
 | `/api/seed` | POST | 데모 데이터 로드 (28 chunks) |
 
-### Local Python Indexer (v3.0)
-- Google Drive 동기화 폴더 스캔 + 증분 인덱싱
-- 6개 파일 형식: PPTX, PDF, XLSX, CSV, ipynb, DOCX
-- 자동 태깅: TF 키워드, 주제분류, 기관인식, 문서단계, 중요도
-- **v3.0**: 인덱싱 후 서버측 임베딩 생성 자동 트리거
-- `--embed` 플래그: 임베딩만 단독 생성
-
-## Data Architecture
-- **Database**: Cloudflare D1 SQLite (FTS5 + Vector)
-- **Embedding**: TF-IDF 300차원, JSON float array in D1 TEXT column
-- **Vector Search**: 코사인 유사도 (JS 계산, threshold 0.1)
-- **RAG Pipeline**: FTS + 시맨틱 하이브리드 검색 → Top 6 컨텍스트 → OpenAI or fallback
-
 ## Quick Start
 
 ### Web Application (Sandbox)
@@ -72,8 +74,8 @@ npm install
 npm run build
 npm run db:migrate:local
 pm2 start ecosystem.config.cjs
-curl -X POST http://localhost:3000/api/seed       # Load demo data
-curl -X POST http://localhost:3000/api/embeddings/generate  # Generate embeddings
+curl -X POST http://localhost:3000/api/seed
+curl -X POST http://localhost:3000/api/embeddings/generate
 ```
 
 ### Local Python Indexer
@@ -85,23 +87,48 @@ python indexer.py          # Parse + tag + upload + embed
 python indexer.py --embed  # Regenerate embeddings only
 ```
 
+### OAuth 설정 (카카오/네이버/구글)
+```bash
+# .dev.vars (로컬 개발)
+KAKAO_CLIENT_ID=your_kakao_app_key
+KAKAO_CLIENT_SECRET=your_kakao_secret
+NAVER_CLIENT_ID=your_naver_client_id
+NAVER_CLIENT_SECRET=your_naver_secret
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_secret
+APP_URL=http://localhost:3000
+
+# Production (Cloudflare secrets)
+npx wrangler pages secret put KAKAO_CLIENT_ID --project-name knowledge-wiki
+npx wrangler pages secret put KAKAO_CLIENT_SECRET --project-name knowledge-wiki
+# ... (각 프로바이더에 대해 반복)
+```
+
 ### OpenAI API Key (optional, for AI Q&A)
 ```bash
-# .dev.vars (local development)
+# .dev.vars
 OPENAI_API_KEY=sk-xxx
 
 # Production
 npx wrangler pages secret put OPENAI_API_KEY --project-name knowledge-wiki
 ```
 
+## Data Architecture
+- **Database**: Cloudflare D1 SQLite (FTS5 + Vector + Auth)
+- **Tables**: chunks, chunks_fts, users, sessions, oauth_states
+- **Embedding**: TF-IDF 300차원, JSON float array in D1 TEXT column
+- **Auth**: Cookie-based session, SHA-256 password, OAuth 2.0
+
 ## Roadmap
 - [x] Phase 1: MVP - FTS5 전문검색 + 위치정보
 - [x] Phase 2: 자동 메타데이터 태깅 + DBpia 스타일 UI
 - [x] Phase 3: 벡터 임베딩 + 시맨틱 검색 + AI Q&A (RAG)
-- [ ] Phase 4: 온톨로지/지식그래프 (GraphRAG)
-- [ ] Phase 5: AI 에이전트 (요약/제안서 초안 자동작성)
+- [x] Phase 4: 인증 시스템 (카카오/네이버/구글/이메일)
+- [ ] Phase 5: 온톨로지/지식그래프 (GraphRAG)
+- [ ] Phase 6: AI 에이전트 (요약/제안서 초안 자동작성)
 
 ## Deployment
 - **Platform**: Cloudflare Pages
+- **GitHub**: https://github.com/seokjae-lim/wiki
 - **Status**: Sandbox 운영 중
 - **Last Updated**: 2026-02-21
